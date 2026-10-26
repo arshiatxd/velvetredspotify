@@ -1,6 +1,21 @@
-# 🍷 Spotify Velvet Red Edition
+<p align="center">
+  <img src="assets/logo.png" width="130" height="130" alt="Spotify Velvet Red Logo" />
+</p>
 
-An authentic **Windows 7 Aero Glass & Windows Media Player 11 Velvet Red** desktop overhaul for Spotify, featuring a stationary **Windows Media Center (Windows Vista) "Alchemy & Battery"** music-reactive lyrics visualizer with multi-edge palpitations and dynamic color shifting.
+<h1 align="center">🍷 Spotify Velvet Red Edition</h1>
+
+<p align="center">
+  <strong>An authentic Windows 7 Aero Glass & Windows Media Player 11 Velvet Red overhaul for Spotify Desktop.</strong><br>
+  Featuring a stationary Windows Media Center (Vista) music-reactive lyrics visualizer with multi-edge palpitations, dynamic neon spectrum shifts, and centered 3D Glass Jewel transport controls.
+</p>
+
+<p align="center">
+  <a href="#-installation"><img src="https://img.shields.io/badge/Installer-Ready-crimson.svg?style=flat-square" alt="Installer Ready" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-darkred.svg?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/arshiatxd/velvetredspotify"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg?style=flat-square" alt="Windows 10/11" /></a>
+</p>
+
+<br>
 
 ![Home Preview](assets/home_preview.png)
 
@@ -60,6 +75,14 @@ Spotify_VelvetRed_Setup.exe /S
 If you ever want to revert back to default Spotify:
 1. Run `Spotify_VelvetRed_Setup.exe`.
 2. Click **Restore Backup**.
+
+---
+
+## 🔒 Privacy & Account Security
+
+- **Zero Credentials Touched**: This modification operates strictly within Spotify's frontend presentation layer (`xpui.spa`). It contains only CSS styling and an HTML5 canvas rendering script.
+- **Local DPAPI Encryption**: All Spotify credentials, OAuth refresh tokens, and session databases are stored separately in `%APPDATA%\Spotify\Users\` and protected by Windows DPAPI. Neither this theme nor the installer reads, touches, or transmits any account data.
+- **100% Offline & Open-Source**: The complete installer source (`src/SetupInstaller.cs`), theme (`src/xpui.css`), and visualizer (`src/lyrics-visualizer.js`) are included in this repo with zero telemetry or network calls.
 
 ---
 
