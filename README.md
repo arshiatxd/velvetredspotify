@@ -17,8 +17,6 @@
 
 <br>
 
-![Home Preview](assets/home_preview.png)
-
 ---
 
 ## ✨ Features
@@ -47,12 +45,6 @@
   - Pure CSS hardware-accelerated styling with zero background canvas loops or heavy CPU/GPU rendering overhead.
   - 0% idle CPU impact, silky smooth high-refresh-rate scrolling (60Hz / 120Hz / 144Hz+).
   - Fully responsive across all display scaling settings.
-
----
-
-## 📸 Lyrics Scene Preview
-
-![Lyrics Preview](assets/lyrics_preview.png)
 
 ---
 
