@@ -553,22 +553,139 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
 }
 
 .FUYNhisXTCmbzt9IDxnT,
+.FUYNhisXTCmbzt9IDxnT > div,
 .Ic4bfFdbH0wM0kHVLBiw,
 .YMsGXPVKmUe0oQtcmynz,
+.QdB2YtfEq0ks5O4QbtwX:has(.FUYNhisXTCmbzt9IDxnT) {
+  position: relative !important;
+  background-color: transparent !important;
+  background: transparent !important;
+  --lyrics-color-background: transparent !important;
+}
+
+.o4GE4jG5_QICak2JK_bn {
+  background-color: transparent !important;
+  background: transparent !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .Root__lyrics-cinema,
 .main-view-container__scroll-node:has(.FUYNhisXTCmbzt9IDxnT),
 .main-view-container__scroll-node-child:has(.FUYNhisXTCmbzt9IDxnT),
 .os-viewport:has(.FUYNhisXTCmbzt9IDxnT) {
-  background: radial-gradient(circle at 50% 30%, #2a050f 0%, #150207 60%, #0c0104 100%) !important;
-  background-color: #0c0104 !important;
-  --lyrics-color-background: #0c0104 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+#spotify-lyrics-visualizer {
+  position: fixed !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  border-radius: 10px !important;
+  background-color: #030502 !important;
+}
+
+#spotify-lyrics-visualizer.surface-mode {
+  z-index: 45 !important;
+  pointer-events: auto !important;
+}
+
+#wmp-visualizer-surface-hud {
+  position: fixed !important;
+  z-index: 46 !important;
+  pointer-events: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  padding: 22px 28px !important;
+  box-sizing: border-box !important;
+  font-family: "Segoe UI", Tahoma, sans-serif !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-top {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  width: 100% !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-badge {
+  background: rgba(10, 14, 10, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  border-radius: 14px !important;
+  padding: 4px 12px !important;
+  color: rgba(235, 245, 235, 0.85) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.6px !important;
+  text-transform: uppercase !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.7) !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-close {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  background: linear-gradient(180deg, rgba(220, 45, 75, 0.85) 0%, rgba(110, 12, 28, 0.9) 100%) !important;
+  border: 1px solid rgba(255, 185, 200, 0.7) !important;
+  border-radius: 14px !important;
+  padding: 4px 14px !important;
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.8) !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-bottom {
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 18px rgba(0, 0, 0, 0.9) !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-title {
+  color: #ffffff !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  margin-bottom: 2px !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-artist {
+  color: rgba(225, 235, 225, 0.8) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+#wmp-visualizer-surface-btn {
+  background: transparent !important;
+  border: none !important;
+  width: 32px !important;
+  height: 32px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  color: rgba(255, 215, 225, 0.75) !important;
+  border-radius: 50% !important;
+  transition: color 0.15s ease, transform 0.15s ease !important;
+}
+
+#wmp-visualizer-surface-btn:hover,
+#wmp-visualizer-surface-btn.active {
+  color: #ff4d73 !important;
+  filter: drop-shadow(0 0 6px rgba(255, 60, 100, 0.85)) !important;
+}
+
+.FUYNhisXTCmbzt9IDxnT > *:not(#spotify-lyrics-visualizer),
+.jEMA2gVoLgPQqAFrPhFw > *:not(#spotify-lyrics-visualizer),
+.QdB2YtfEq0ks5O4QbtwX > *:not(#spotify-lyrics-visualizer) {
+  position: relative !important;
+  z-index: 2 !important;
 }
 
 .lyrics-lyricsContent-lyric,
 [data-testid="fullscreen-lyric"],
 .FUYNhisXTCmbzt9IDxnT div,
 .FUYNhisXTCmbzt9IDxnT p {
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95), 0 0 16px rgba(180, 20, 45, 0.4) !important;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 20px rgba(0, 0, 0, 0.85) !important;
+  position: relative !important;
+  z-index: 2 !important;
 }
 
 .lyrics-lyricsContent-active,

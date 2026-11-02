@@ -9,10 +9,10 @@ using System.Windows.Forms;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("Spotify WMP11 Velvet Red Edition Setup")]
-[assembly: AssemblyDescription("Standalone Installer for Spotify Windows 7 Aero & WMP 11 Velvet Red Theme")]
+[assembly: AssemblyDescription("Standalone Installer for Spotify Windows 7 Aero & WMP 11 Velvet Red Theme + WMP Tunnel Visualizer")]
 [assembly: AssemblyCompany("Retro Aero Mod")]
 [assembly: AssemblyProduct("Spotify WMP11 Velvet Red Edition")]
-[assembly: AssemblyVersion("6.0.0.0")]
+[assembly: AssemblyVersion("6.1.0.0")]
 
 namespace SpotifyRetroSetup
 {
@@ -56,7 +56,7 @@ namespace SpotifyRetroSetup
             lblDesc.Text = "Features:\r\n" +
                            "  • Authentic Windows 7 Aero Glass & WMP 11 Velvet Red UI\r\n" +
                            "  • Perfectly Centered WMP 11 Transport Controls\r\n" +
-                           "  • Zero-Lag Ultra-Smooth High Performance Engine\r\n" +
+                           "  • Windows XP Tunnel & Spiral Waveform Visualizer (Low-RAM)\r\n" +
                            "  • Custom Multi-Resolution Glossy Red Spotify App Icon";
             lblDesc.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
             lblDesc.ForeColor = Color.FromArgb(225, 205, 212);
