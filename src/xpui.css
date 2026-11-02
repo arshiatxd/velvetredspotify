@@ -585,8 +585,22 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
   background-color: transparent !important;
 }
 
+.main-view-container:has(#spotify-lyrics-visualizer.surface-mode) > .under-main-view,
+.main-view-container:has(#spotify-lyrics-visualizer.surface-mode) > .main-view-container__scroll-node,
+.main-view-container:has(#spotify-lyrics-visualizer.surface-mode) > .over-main-view,
+.jEMA2gVoLgPQqAFrPhFw:has(#spotify-lyrics-visualizer.surface-mode) header,
+.jEMA2gVoLgPQqAFrPhFw:has(#spotify-lyrics-visualizer.surface-mode) [data-testid="topbar"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
 #spotify-lyrics-visualizer {
-  position: fixed !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   z-index: 1 !important;
   pointer-events: none !important;
   border-radius: 10px !important;
@@ -594,13 +608,35 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
 }
 
 #spotify-lyrics-visualizer.lyrics-mode {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   z-index: 1 !important;
   opacity: 0.82 !important;
   pointer-events: none !important;
 }
 
 #spotify-lyrics-visualizer.surface-mode {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   z-index: 45 !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+#spotify-lyrics-visualizer.fullscreen-mode {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9998 !important;
+  border-radius: 0 !important;
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -646,7 +682,7 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
 
 #wmp-visualizer-surface-hud {
   position: fixed !important;
-  z-index: 46 !important;
+  z-index: 9999 !important;
   pointer-events: none !important;
   display: flex !important;
   flex-direction: column !important;
@@ -663,6 +699,12 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
   gap: 12px !important;
   width: 100% !important;
   flex-wrap: wrap !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
 }
 
 #wmp-visualizer-surface-hud .wmp-studio-bar {
@@ -748,6 +790,28 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
   width: 13px !important;
   height: 13px !important;
   margin: 0 !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-fullscreen {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: linear-gradient(180deg, rgba(58, 14, 26, 0.9) 0%, rgba(22, 4, 10, 0.95) 100%) !important;
+  border: 1px solid rgba(255, 160, 185, 0.65) !important;
+  border-radius: 14px !important;
+  padding: 6px 13px !important;
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+  transition: transform 0.12s ease, border-color 0.15s ease !important;
+}
+
+#wmp-visualizer-surface-hud .wmp-hud-fullscreen:hover {
+  transform: scale(1.03) !important;
+  border-color: #ffffff !important;
 }
 
 #wmp-visualizer-surface-hud .wmp-hud-close {

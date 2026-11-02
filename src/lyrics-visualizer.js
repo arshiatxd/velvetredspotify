@@ -53,6 +53,7 @@
   var wheelImageCache = null;
 
   var surfaceMode = false;
+  var fullscreenMode = false;
   var wasLyricsOpen = false;
   var isRunning = false;
   var rafId = 0;
@@ -494,121 +495,137 @@
       backCtx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
     }
 
-    var hostContainer = document.querySelector(".main-view-container") || document.body;
-    if (hostContainer && canvas.parentElement !== hostContainer) {
-      if (hostContainer.firstChild) {
-        hostContainer.insertBefore(canvas, hostContainer.firstChild);
-      } else {
-        hostContainer.appendChild(canvas);
+      var hostContainer = fullscreenMode ? document.body : document.querySelector(".main-view-container") || document.body;
+      if (hostContainer && canvas.parentElement !== hostContainer) {
+        if (!fullscreenMode && hostContainer.firstChild) {
+          hostContainer.insertBefore(canvas, hostContainer.firstChild);
+        } else {
+          hostContainer.appendChild(canvas);
+        }
       }
-    }
 
-    if (!lyricsToggleBtn && document.body) {
-      lyricsToggleBtn = document.createElement("button");
-      lyricsToggleBtn.id = "wmp-lyrics-viz-toggle";
-      lyricsToggleBtn.type = "button";
-      updateLyricsToggleUI();
-      lyricsToggleBtn.addEventListener("click", function () {
-        settings.lyricsVizOn = !settings.lyricsVizOn;
-        saveSettings();
+      if (!lyricsToggleBtn && document.body) {
+        lyricsToggleBtn = document.createElement("button");
+        lyricsToggleBtn.id = "wmp-lyrics-viz-toggle";
+        lyricsToggleBtn.type = "button";
         updateLyricsToggleUI();
-        evaluateVisibilityAndLifecycle();
-      });
-      document.body.appendChild(lyricsToggleBtn);
-    }
-
-    if (!hudEl && document.body) {
-      hudEl = document.createElement("div");
-      hudEl.id = "wmp-visualizer-surface-hud";
-      hudEl.style.display = "none";
-      hudEl.innerHTML =
-        '<div class="wmp-hud-top">' +
-        '<div class="wmp-studio-bar">' +
-        '<div class="wmp-model-group">' +
-        '<button type="button" class="wmp-model-btn" data-model="tunnel">XP Tunnel</button>' +
-        '<button type="button" class="wmp-model-btn" data-model="spiral">Spiral Vortex</button>' +
-        '<button type="button" class="wmp-model-btn" data-model="starburst">WMC Starburst</button>' +
-        '<button type="button" class="wmp-model-btn" data-model="scope">Scope & Bars</button>' +
-        '<button type="button" class="wmp-model-btn" data-model="cyber">Cyber Orb</button>' +
-        "</div>" +
-        '<div class="wmp-divider"></div>' +
-        '<div class="wmp-color-controls">' +
-        '<canvas id="wmp-color-wheel-canvas" width="32" height="32" title="Drag on RGB Color Wheel to select custom color"></canvas>' +
-        '<label class="wmp-rot-label" title="Automatically rotate colors across the RGB spectrum">' +
-        '<input type="checkbox" id="wmp-rgb-rot-checkbox" />' +
-        "<span>RGB Rotation</span>" +
-        "</label>" +
-        "</div>" +
-        "</div>" +
-        '<button class="wmp-hud-close" type="button">Exit Surface</button>' +
-        "</div>" +
-        '<div class="wmp-hud-bottom">' +
-        "<div>" +
-        '<div class="wmp-hud-title" id="wmp-hud-track-title">Spotify Velvet Red</div>' +
-        '<div class="wmp-hud-artist" id="wmp-hud-track-artist">Playing Audio Stream</div>' +
-        "</div>" +
-        "</div>";
-      document.body.appendChild(hudEl);
-
-      var modelBtns = hudEl.querySelectorAll(".wmp-model-btn");
-      for (var m = 0; m < modelBtns.length; m++) {
-        (function (btn) {
-          var mName = btn.getAttribute("data-model");
-          if (mName === settings.model) btn.classList.add("active");
-          btn.addEventListener("click", function () {
-            settings.model = mName;
-            saveSettings();
-            for (var k = 0; k < modelBtns.length; k++) {
-              modelBtns[k].classList.toggle("active", modelBtns[k] === btn);
-            }
-            if (ctx && backCtx) {
-              ctx.fillStyle = "#010203";
-              ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-              backCtx.fillStyle = "#010203";
-              backCtx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-            }
-          });
-        })(modelBtns[m]);
-      }
-
-      wheelCanvas = document.getElementById("wmp-color-wheel-canvas");
-      if (wheelCanvas) {
-        wheelCtx = wheelCanvas.getContext("2d");
-        var draggingWheel = false;
-        wheelCanvas.addEventListener("mousedown", function (e) {
-          draggingWheel = true;
-          pickColorFromWheelEvent(e);
-        });
-        window.addEventListener("mousemove", function (e) {
-          if (draggingWheel) pickColorFromWheelEvent(e);
-        });
-        window.addEventListener("mouseup", function () {
-          draggingWheel = false;
-        });
-        drawColorWheelWidget();
-      }
-
-      var rotCb = document.getElementById("wmp-rgb-rot-checkbox");
-      if (rotCb) {
-        rotCb.checked = settings.rgbRotation;
-        rotCb.addEventListener("change", function () {
-          settings.rgbRotation = !!rotCb.checked;
-          if (!settings.rgbRotation) {
-            currentHue = settings.customHue;
-            targetHue = settings.customHue;
-          }
+        lyricsToggleBtn.addEventListener("click", function () {
+          settings.lyricsVizOn = !settings.lyricsVizOn;
           saveSettings();
-          drawColorWheelWidget();
+          updateLyricsToggleUI();
+          evaluateVisibilityAndLifecycle();
         });
+        document.body.appendChild(lyricsToggleBtn);
       }
 
-      var closeBtn = hudEl.querySelector(".wmp-hud-close");
-      if (closeBtn) {
-        closeBtn.addEventListener("click", function () {
-          setSurfaceMode(false);
-        });
+      if (!hudEl && document.body) {
+        hudEl = document.createElement("div");
+        hudEl.id = "wmp-visualizer-surface-hud";
+        hudEl.style.display = "none";
+        hudEl.innerHTML =
+          '<div class="wmp-hud-top">' +
+          '<div class="wmp-studio-bar">' +
+          '<div class="wmp-model-group">' +
+          '<button type="button" class="wmp-model-btn" data-model="tunnel">XP Tunnel</button>' +
+          '<button type="button" class="wmp-model-btn" data-model="spiral">Spiral Vortex</button>' +
+          '<button type="button" class="wmp-model-btn" data-model="starburst">WMC Starburst</button>' +
+          '<button type="button" class="wmp-model-btn" data-model="scope">Scope & Bars</button>' +
+          '<button type="button" class="wmp-model-btn" data-model="cyber">Cyber Orb</button>' +
+          "</div>" +
+          '<div class="wmp-divider"></div>' +
+          '<div class="wmp-color-controls">' +
+          '<canvas id="wmp-color-wheel-canvas" width="32" height="32" title="Drag on RGB Color Wheel to select custom color"></canvas>' +
+          '<label class="wmp-rot-label" title="Automatically rotate colors across the RGB spectrum">' +
+          '<input type="checkbox" id="wmp-rgb-rot-checkbox" />' +
+          "<span>RGB Rotation</span>" +
+          "</label>" +
+          "</div>" +
+          "</div>" +
+          '<div class="wmp-hud-actions">' +
+          '<button class="wmp-hud-fullscreen" id="wmp-hud-fullscreen-btn" type="button" title="Toggle Fullscreen Visualizer (F11 / Esc)">' +
+          '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
+          '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>' +
+          "</svg>" +
+          "<span>Fullscreen</span>" +
+          "</button>" +
+          '<button class="wmp-hud-close" type="button">Exit Surface</button>' +
+          "</div>" +
+          "</div>" +
+          '<div class="wmp-hud-bottom">' +
+          "<div>" +
+          '<div class="wmp-hud-title" id="wmp-hud-track-title">Spotify Velvet Red</div>' +
+          '<div class="wmp-hud-artist" id="wmp-hud-track-artist">Playing Audio Stream</div>' +
+          "</div>" +
+          "</div>";
+        document.body.appendChild(hudEl);
+
+        var modelBtns = hudEl.querySelectorAll(".wmp-model-btn");
+        for (var m = 0; m < modelBtns.length; m++) {
+          (function (btn) {
+            var mName = btn.getAttribute("data-model");
+            if (mName === settings.model) btn.classList.add("active");
+            btn.addEventListener("click", function () {
+              settings.model = mName;
+              saveSettings();
+              for (var k = 0; k < modelBtns.length; k++) {
+                modelBtns[k].classList.toggle("active", modelBtns[k] === btn);
+              }
+              if (ctx && backCtx) {
+                ctx.fillStyle = "#010203";
+                ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
+                backCtx.fillStyle = "#010203";
+                backCtx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
+              }
+            });
+          })(modelBtns[m]);
+        }
+
+        wheelCanvas = document.getElementById("wmp-color-wheel-canvas");
+        if (wheelCanvas) {
+          wheelCtx = wheelCanvas.getContext("2d");
+          var draggingWheel = false;
+          wheelCanvas.addEventListener("mousedown", function (e) {
+            draggingWheel = true;
+            pickColorFromWheelEvent(e);
+          });
+          window.addEventListener("mousemove", function (e) {
+            if (draggingWheel) pickColorFromWheelEvent(e);
+          });
+          window.addEventListener("mouseup", function () {
+            draggingWheel = false;
+          });
+          drawColorWheelWidget();
+        }
+
+        var rotCb = document.getElementById("wmp-rgb-rot-checkbox");
+        if (rotCb) {
+          rotCb.checked = settings.rgbRotation;
+          rotCb.addEventListener("change", function () {
+            settings.rgbRotation = !!rotCb.checked;
+            if (!settings.rgbRotation) {
+              currentHue = settings.customHue;
+              targetHue = settings.customHue;
+            }
+            saveSettings();
+            drawColorWheelWidget();
+          });
+        }
+
+        var fsBtn = document.getElementById("wmp-hud-fullscreen-btn");
+        if (fsBtn) {
+          fsBtn.addEventListener("click", function () {
+            setFullscreenMode(!fullscreenMode);
+          });
+        }
+
+        var closeBtn = hudEl.querySelector(".wmp-hud-close");
+        if (closeBtn) {
+          closeBtn.addEventListener("click", function () {
+            setFullscreenMode(false);
+            setSurfaceMode(false);
+          });
+        }
       }
-    }
   }
 
   function updateLyricsToggleUI() {
@@ -670,10 +687,50 @@
 
   function setSurfaceMode(enabled) {
     surfaceMode = !!enabled;
+    if (!surfaceMode && fullscreenMode) {
+      setFullscreenMode(false);
+      return;
+    }
     if (surfaceBtn) {
       if (surfaceMode) surfaceBtn.classList.add("active");
       else surfaceBtn.classList.remove("active");
     }
+    rectDirty = true;
+    evaluateVisibilityAndLifecycle();
+  }
+
+  function updateFullscreenBtnUI() {
+    var fsBtn = document.getElementById("wmp-hud-fullscreen-btn");
+    if (!fsBtn) return;
+    if (fullscreenMode) {
+      fsBtn.innerHTML =
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
+        '<path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/>' +
+        "</svg>" +
+        "<span>Exit Fullscreen</span>";
+    } else {
+      fsBtn.innerHTML =
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
+        '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>' +
+        "</svg>" +
+        "<span>Fullscreen</span>";
+    }
+  }
+
+  function setFullscreenMode(enabled) {
+    fullscreenMode = !!enabled;
+    if (fullscreenMode) {
+      surfaceMode = true;
+      if (surfaceBtn) surfaceBtn.classList.add("active");
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(function () {});
+      }
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(function () {});
+      }
+    }
+    updateFullscreenBtnUI();
     rectDirty = true;
     evaluateVisibilityAndLifecycle();
   }
@@ -687,7 +744,7 @@
     }
     if (cachedViewportEl) {
       var r = cachedViewportEl.getBoundingClientRect();
-      if (r.width > 100 && r.height > 100) {
+      if (r.width > 100 && r.height > 100 && r.left >= -10 && r.left < window.innerWidth) {
         rectLeft = Math.round(r.left);
         rectTop = Math.round(r.top);
         rectWidth = Math.round(r.width);
@@ -700,24 +757,20 @@
   function isLyricsScreenOpen() {
     var el = document.querySelector('.FUYNhisXTCmbzt9IDxnT, [data-testid="lyrics-page"], .Root__lyrics-cinema');
     if (!el || !el.isConnected) return false;
-    return el.clientHeight > 80 && el.clientWidth > 80;
+    var r = el.getBoundingClientRect();
+    return r.height > 80 && r.width > 80 && r.left >= -20 && r.left < window.innerWidth - 40;
   }
 
   function evaluateVisibilityAndLifecycle() {
     ensurePlayerBarButton();
     var lyricsOpen = isLyricsScreenOpen();
-
-    if (lyricsOpen && !wasLyricsOpen && surfaceMode) {
-      surfaceMode = false;
-      if (surfaceBtn) surfaceBtn.classList.remove("active");
-    }
     wasLyricsOpen = lyricsOpen;
 
     ensureCanvasAndHud();
     updateViewportBounds();
 
     if (lyricsToggleBtn) {
-      if (lyricsOpen && !surfaceMode) {
+      if (lyricsOpen && !surfaceMode && !fullscreenMode) {
         lyricsToggleBtn.style.display = "inline-flex";
         lyricsToggleBtn.style.top = rectTop + 16 + "px";
         lyricsToggleBtn.style.left = rectLeft + rectWidth - 155 + "px";
@@ -726,7 +779,7 @@
       }
     }
 
-    var shouldShow = surfaceMode || (lyricsOpen && settings.lyricsVizOn);
+    var shouldShow = surfaceMode || fullscreenMode || (lyricsOpen && settings.lyricsVizOn);
 
     if (!shouldShow) {
       if (isRunning) {
@@ -736,19 +789,33 @@
           rafId = 0;
         }
       }
-      if (canvas) canvas.style.display = "none";
+      if (canvas) {
+        canvas.style.display = "none";
+        canvas.classList.remove("surface-mode", "lyrics-mode", "fullscreen-mode");
+      }
       if (hudEl) hudEl.style.display = "none";
       return;
     }
 
     canvas.style.display = "block";
-    canvas.style.left = rectLeft + "px";
-    canvas.style.top = rectTop + "px";
-    canvas.style.width = rectWidth + "px";
-    canvas.style.height = rectHeight + "px";
+    canvas.style.left = "";
+    canvas.style.top = "";
+    canvas.style.width = "";
+    canvas.style.height = "";
 
-    if (surfaceMode) {
-      canvas.classList.remove("lyrics-mode");
+    if (fullscreenMode) {
+      canvas.classList.remove("lyrics-mode", "surface-mode");
+      canvas.classList.add("fullscreen-mode");
+      if (hudEl) {
+        hudEl.style.display = "flex";
+        hudEl.style.left = "0px";
+        hudEl.style.top = "0px";
+        hudEl.style.width = "100vw";
+        hudEl.style.height = "100vh";
+        updateHudInfo();
+      }
+    } else if (surfaceMode) {
+      canvas.classList.remove("lyrics-mode", "fullscreen-mode");
       canvas.classList.add("surface-mode");
       if (hudEl) {
         hudEl.style.display = "flex";
@@ -759,7 +826,7 @@
         updateHudInfo();
       }
     } else {
-      canvas.classList.remove("surface-mode");
+      canvas.classList.remove("surface-mode", "fullscreen-mode");
       canvas.classList.add("lyrics-mode");
       if (hudEl) hudEl.style.display = "none";
     }
@@ -1096,10 +1163,12 @@
 
     if (rectDirty) {
       updateViewportBounds();
-      canvas.style.left = rectLeft + "px";
-      canvas.style.top = rectTop + "px";
-      canvas.style.width = rectWidth + "px";
-      canvas.style.height = rectHeight + "px";
+      if (hudEl && surfaceMode && !fullscreenMode) {
+        hudEl.style.left = rectLeft + "px";
+        hudEl.style.top = rectTop + "px";
+        hudEl.style.width = rectWidth + "px";
+        hudEl.style.height = rectHeight + "px";
+      }
     }
 
     updateAudioTelemetry(nowMs);
@@ -1151,6 +1220,24 @@
     },
     { passive: true }
   );
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && fullscreenMode) {
+      setFullscreenMode(false);
+    } else if (e.key === "F11" && surfaceMode) {
+      e.preventDefault();
+      setFullscreenMode(!fullscreenMode);
+    }
+  });
+
+  document.addEventListener("fullscreenchange", function () {
+    if (!document.fullscreenElement && fullscreenMode) {
+      fullscreenMode = false;
+      updateFullscreenBtnUI();
+      rectDirty = true;
+      evaluateVisibilityAndLifecycle();
+    }
+  });
 
   setInterval(evaluateVisibilityAndLifecycle, 400);
   if (document.readyState === "loading") {

@@ -42,9 +42,9 @@
   - **Interactive Color Studio**:
     - **RGB Color Wheel Picker**: Click or drag anywhere on the 2D HSV/RGB color wheel in the Visualizer Surface Studio Bar to set a custom hue and saturation.
     - **RGB Color Rotation Checkbox**: Enable continuous rhythm-driven RGB hue rotation or uncheck to lock in your exact chosen color from the RGB wheel.
-  - **Dual Viewing Modes (Strictly Scoped)**:
+  - **Dual Viewing Modes + Fullscreen Option**:
     1. **Lyrics Screen (with On/Off Toggle)**: Renders behind high-contrast Spotify lyrics (`z-index` layered so lyrics stay crisp and readable on top) and includes a floating **`Visualizer: ON / OFF`** button in the top-right corner of the Lyrics view.
-    2. **Dedicated Visualizer Surface Screen**: Toggleable via the custom Vortex button in the bottom-right player bar (`Toggle WMP Tunnel Visualizer Surface`) for a full-surface studio view with model selector pills, RGB Color Wheel, RGB Rotation toggle, and track HUD.
+    2. **Dedicated Visualizer Surface Screen (+ Fullscreen Mode)**: Toggleable via the custom Vortex button in the bottom-right player bar (`Open Visualizer Studio Surface`) for an unobstructed studio view with model selector pills, RGB Color Wheel, RGB Rotation toggle, **`Fullscreen`** toggle (`F11` / `Esc`), and track HUD.
   - **True Bass & Rhythm Reactivity**: Hooks into Spotify's internal `PlayerAPI` and `/audio-attributes/v1/audio-analysis/` telemetry (`segments`, `beats`, `bars`, `loudness_max`, `pitches`, and `timbre`). Quiet passages calm the ring; bass kicks and drops trigger multi-stranded oscilloscope waveform spikes and tunnel zoom surges. Pausing playback settles the visualizer into a calm idle state.
 
 - **Ultra-Low RAM & Utility Optimization**:
