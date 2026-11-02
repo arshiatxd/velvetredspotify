@@ -552,6 +552,10 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
   box-shadow: 0 0 10px rgba(220, 30, 60, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
 }
 
+.FUYNhisXTCmbzt9IDxnT {
+  padding-top: 68px !important;
+}
+
 .FUYNhisXTCmbzt9IDxnT,
 .FUYNhisXTCmbzt9IDxnT > div,
 .Ic4bfFdbH0wM0kHVLBiw,
@@ -643,10 +647,10 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
 
 #wmp-lyrics-viz-toggle {
   position: fixed !important;
-  z-index: 30 !important;
+  z-index: 10002 !important;
   pointer-events: auto !important;
   cursor: pointer !important;
-  display: none;
+  display: none !important;
   align-items: center !important;
   gap: 7px !important;
   padding: 6px 14px !important;
@@ -660,6 +664,10 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
   backdrop-filter: blur(8px) !important;
   transition: transform 0.12s ease, border-color 0.15s ease !important;
+}
+
+#wmp-lyrics-viz-toggle.visible {
+  display: inline-flex !important;
 }
 
 #wmp-lyrics-viz-toggle:hover {
@@ -684,12 +692,16 @@ button[data-testid="control-button-repeat"][aria-checked="mixed"]::after {
   position: fixed !important;
   z-index: 9999 !important;
   pointer-events: none !important;
-  display: flex !important;
+  display: none !important;
   flex-direction: column !important;
   justify-content: space-between !important;
   padding: 18px 24px !important;
   box-sizing: border-box !important;
   font-family: "Segoe UI", Tahoma, sans-serif !important;
+}
+
+#wmp-visualizer-surface-hud.visible {
+  display: flex !important;
 }
 
 #wmp-visualizer-surface-hud .wmp-hud-top {

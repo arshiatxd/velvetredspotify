@@ -521,7 +521,6 @@
       if (!hudEl && document.body) {
         hudEl = document.createElement("div");
         hudEl.id = "wmp-visualizer-surface-hud";
-        hudEl.style.display = "none";
         hudEl.innerHTML =
           '<div class="wmp-hud-top">' +
           '<div class="wmp-studio-bar">' +
@@ -769,13 +768,14 @@
     ensureCanvasAndHud();
     updateViewportBounds();
 
+    var showLyricsToggle = lyricsOpen && !surfaceMode && !fullscreenMode;
     if (lyricsToggleBtn) {
-      if (lyricsOpen && !surfaceMode && !fullscreenMode) {
-        lyricsToggleBtn.style.display = "inline-flex";
-        lyricsToggleBtn.style.top = rectTop + 16 + "px";
+      if (showLyricsToggle) {
+        lyricsToggleBtn.classList.add("visible");
+        lyricsToggleBtn.style.top = rectTop + 18 + "px";
         lyricsToggleBtn.style.left = rectLeft + rectWidth - 155 + "px";
       } else {
-        lyricsToggleBtn.style.display = "none";
+        lyricsToggleBtn.classList.remove("visible");
       }
     }
 
@@ -793,7 +793,9 @@
         canvas.style.display = "none";
         canvas.classList.remove("surface-mode", "lyrics-mode", "fullscreen-mode");
       }
-      if (hudEl) hudEl.style.display = "none";
+      if (hudEl) {
+        hudEl.classList.remove("visible");
+      }
       return;
     }
 
@@ -803,32 +805,51 @@
     canvas.style.width = "";
     canvas.style.height = "";
 
+    var closeBtn = hudEl ? hudEl.querySelector(".wmp-hud-close") : null;
+    var bottomHud = hudEl ? hudEl.querySelector(".wmp-hud-bottom") : null;
+    var actionsGroup = hudEl ? hudEl.querySelector(".wmp-hud-actions") : null;
+
     if (fullscreenMode) {
       canvas.classList.remove("lyrics-mode", "surface-mode");
       canvas.classList.add("fullscreen-mode");
       if (hudEl) {
-        hudEl.style.display = "flex";
+        hudEl.classList.add("visible");
         hudEl.style.left = "0px";
         hudEl.style.top = "0px";
         hudEl.style.width = "100vw";
         hudEl.style.height = "100vh";
+        if (closeBtn) closeBtn.style.display = "inline-flex";
+        if (bottomHud) bottomHud.style.display = "flex";
+        if (actionsGroup) actionsGroup.style.marginRight = "0px";
         updateHudInfo();
       }
     } else if (surfaceMode) {
       canvas.classList.remove("lyrics-mode", "fullscreen-mode");
       canvas.classList.add("surface-mode");
       if (hudEl) {
-        hudEl.style.display = "flex";
+        hudEl.classList.add("visible");
         hudEl.style.left = rectLeft + "px";
         hudEl.style.top = rectTop + "px";
         hudEl.style.width = rectWidth + "px";
         hudEl.style.height = rectHeight + "px";
+        if (closeBtn) closeBtn.style.display = "inline-flex";
+        if (bottomHud) bottomHud.style.display = "flex";
+        if (actionsGroup) actionsGroup.style.marginRight = "0px";
         updateHudInfo();
       }
     } else {
       canvas.classList.remove("surface-mode", "fullscreen-mode");
       canvas.classList.add("lyrics-mode");
-      if (hudEl) hudEl.style.display = "none";
+      if (hudEl) {
+        hudEl.classList.add("visible");
+        hudEl.style.left = rectLeft + "px";
+        hudEl.style.top = rectTop + "px";
+        hudEl.style.width = rectWidth + "px";
+        hudEl.style.height = rectHeight + "px";
+        if (closeBtn) closeBtn.style.display = "none";
+        if (bottomHud) bottomHud.style.display = "none";
+        if (actionsGroup) actionsGroup.style.marginRight = "146px";
+      }
     }
 
     if (!isRunning) {
