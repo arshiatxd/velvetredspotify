@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>An authentic Windows 7 Aero Glass & Windows Media Player 11 Velvet Red overhaul for Spotify Desktop.</strong><br>
-  Featuring a low-RAM <strong>Windows XP Media Player Tunnel & Spiral Waveform Visualizer</strong> (viewable on the Lyrics screen or its dedicated Visualizer Surface screen), real-time bass & rhythm reactivity, and centered 3D Glass Jewel transport controls.
+  Featuring a multi-model <strong>WMP Visualizer Studio</strong> (`XP Tunnel`, `Spiral Vortex`, `WMC Starburst`, `Scope & Bars`, `Cyber Orb`) with an interactive <strong>RGB Color Wheel + RGB Color Rotation</strong>, real-time bass & rhythm reactivity, a Lyrics-page Visualizer On/Off toggle, and centered 3D Glass Jewel transport controls.
 </p>
 
 <p align="center">
@@ -32,17 +32,25 @@
   - Flush Shuffle and Repeat controls.
   - All transport buttons share an exact vertical centerline (`centerY = 918px`) and uniform `10px` horizontal spacing.
 
-- **Windows XP Media Player Tunnel & Spiral Waveform Visualizer**:
+- **WMP Multi-Model Visualizer Studio**:
+  - **5 Selectable Visualizer Models**:
+    1. **XP Tunnel**: Classic Windows XP Media Player 6-strand electric oscilloscope tunnel with crisp radial zoom feedback.
+    2. **Spiral Vortex**: Logarithmic multi-arm spiral galaxy with beat-reactive waveform modulation.
+    3. **WMC Starburst**: Windows Media Center organic multi-lobe harmonic ribbons with edge palpitation.
+    4. **Scope & Bars**: 48-band mirrored spectrum analyzer paired with dual-channel glowing oscilloscope waveforms.
+    5. **Cyber Orb**: Concentric plasma rings with 36-spoke radial audio spikes and core bass glow.
+  - **Interactive Color Studio**:
+    - **RGB Color Wheel Picker**: Click or drag anywhere on the 2D HSV/RGB color wheel in the Visualizer Surface Studio Bar to set a custom hue and saturation.
+    - **RGB Color Rotation Checkbox**: Enable continuous rhythm-driven RGB hue rotation or uncheck to lock in your exact chosen color from the RGB wheel.
   - **Dual Viewing Modes (Strictly Scoped)**:
-    1. **Lyrics Screen**: Automatically renders behind the Spotify Lyrics view.
-    2. **Dedicated Visualizer Surface Screen**: Toggleable via the custom Vortex button in the bottom-right player bar (`Toggle WMP Tunnel Visualizer Surface`) for an unobstructed full-surface view with a floating track title HUD.
+    1. **Lyrics Screen (with On/Off Toggle)**: Renders behind high-contrast Spotify lyrics (`z-index` layered so lyrics stay crisp and readable on top) and includes a floating **`Visualizer: ON / OFF`** button in the top-right corner of the Lyrics view.
+    2. **Dedicated Visualizer Surface Screen**: Toggleable via the custom Vortex button in the bottom-right player bar (`Toggle WMP Tunnel Visualizer Surface`) for a full-surface studio view with model selector pills, RGB Color Wheel, RGB Rotation toggle, and track HUD.
   - **True Bass & Rhythm Reactivity**: Hooks into Spotify's internal `PlayerAPI` and `/audio-attributes/v1/audio-analysis/` telemetry (`segments`, `beats`, `bars`, `loudness_max`, `pitches`, and `timbre`). Quiet passages calm the ring; bass kicks and drops trigger multi-stranded oscilloscope waveform spikes and tunnel zoom surges. Pausing playback settles the visualizer into a calm idle state.
-  - **Windows Color Shifting**: Smoothly cycles through classic Windows XP Media Player palettes (Emerald Green, Electric Cyan, Sapphire Blue, Neon Violet, Velvet Red, Acid Lime, and Solar Amber) on bar downbeats and vocal transitions.
 
 - **Ultra-Low RAM & Utility Optimization**:
-  - Fixed `420 × 260` internal canvas buffer (`< 430 KB` RAM — **95% less memory** than full-HD canvases) with GPU bilinear upscaling.
+  - Fixed `600 × 375` internal canvas buffer (`< 900 KB` RAM) with GPU bilinear upscaling and crisp electric strand rendering.
   - Pre-allocated `Float32Array` geometry and harmonic tables with **zero garbage collection allocations** inside the render loop.
-  - **0% Background CPU/GPU**: The rendering timer completely hibernates (`clearTimeout`) and unmounts when neither the Lyrics screen nor the Visualizer Surface screen is open.
+  - **0% Background CPU/GPU**: The rendering timer completely hibernates (`clearTimeout`) and unmounts when neither the Lyrics screen nor the Visualizer Surface screen is active (or when toggled OFF on the Lyrics page).
 
 - **Custom Multi-Resolution Application Icon**:
   - High-fidelity Windows `.ico` containing 16x16, 24x24, 32x32, 48x48, 64x64, 128x128 (32-bit BGRA DIB + 1-bit AND mask), and 256x256 (PNG).
@@ -84,7 +92,7 @@ If you ever want to revert back to default Spotify:
 | :--- | :--- |
 | **Package Target** | `%APPDATA%\Spotify\Apps\xpui.spa` |
 | **Theme Engine** | Clean, comment-free CSS injected into `xpui.css` |
-| **Visualizer Engine** | Low-RAM `420×260` 2D Canvas Tunnel & Spiral Waveform (`src/lyrics-visualizer.js`) |
+| **Visualizer Engine** | Low-RAM `600×375` 2D Canvas Studio with 5 Models & RGB Wheel (`src/lyrics-visualizer.js`) |
 | **Icon Resource** | `%APPDATA%\Spotify\spotify-final.ico` |
 | **Installer** | Standalone .NET WinForms executable compiled via native `csc.exe` |
 
