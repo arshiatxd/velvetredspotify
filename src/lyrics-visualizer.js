@@ -105,6 +105,10 @@
   var throatOffsetY = 0;
   var gridOffset = 0;
   var edgeAngle = 0;
+  var localPlayPosSec = 0;
+  var lastAnchorRaw = "";
+  var lastTelemetryMs = 0;
+  var trackDurationSec = 240;
 
   function connectSpotifyInternalAPIs() {
     if (spPlayerAPI && spRequestBuilder) return true;
@@ -257,14 +261,28 @@
   function updateAudioTelemetry(nowMs) {
     connectSpotifyInternalAPIs();
 
-    var posSec = 0;
+    var dtSec = lastTelemetryMs > 0 ? Math.min(0.25, Math.max(0.005, (nowMs - lastTelemetryMs) * 0.001)) : 0.033;
+    lastTelemetryMs = nowMs;
+
+    var wallNow = Date.now();
     if (spPlayerAPI && spPlayerAPI.getState) {
       var st = spPlayerAPI.getState();
       if (st) {
         isMusicPlaying = !st.isPaused;
         var basePos = Number(st.positionAsOfTimestamp) || 0;
-        var ts = Number(st.timestamp) || nowMs;
-        posSec = (isMusicPlaying ? basePos + Math.max(0, nowMs - ts) : basePos) / 1000;
+        var ts = Number(st.timestamp) || wallNow;
+        var dur = Number(st.duration) || (st.item && Number(st.item.duration)) || 0;
+        if (dur > 1000) trackDurationSec = dur * 0.001;
+
+        var anchorKey = basePos + ":" + ts + ":" + (isMusicPlaying ? 1 : 0);
+        if (anchorKey !== lastAnchorRaw) {
+          lastAnchorRaw = anchorKey;
+          var elapsedMs = ts > 1000000000000 ? Math.max(0, wallNow - ts) : Math.max(0, nowMs - ts);
+          if (elapsedMs > 600000) elapsedMs = 0;
+          localPlayPosSec = (isMusicPlaying ? basePos + elapsedMs : basePos) * 0.001;
+        } else if (isMusicPlaying) {
+          localPlayPosSec += dtSec;
+        }
 
         var item = st.item;
         if (item && item.uri) {
@@ -274,6 +292,7 @@
             currentTrackId = tid;
             currentTrackTitle = item.name || (item.metadata && item.metadata.title) || "";
             currentTrackArtist = (item.metadata && item.metadata.artist_name) || "";
+            localPlayPosSec = basePos * 0.001;
             updateHudInfo();
             fetchAudioAnalysis(tid);
           }
@@ -285,7 +304,10 @@
         var label = (playBtn.getAttribute("aria-label") || "").toLowerCase();
         isMusicPlaying = label.indexOf("pause") !== -1;
       }
+      if (isMusicPlaying) localPlayPosSec += dtSec;
     }
+
+    var posSec = localPlayPosSec;
 
     if (!isMusicPlaying) {
       smoothBass *= 0.84;
@@ -310,85 +332,93 @@
       }
     }
 
+    var hasValidSegment = false;
     if (trackAnalysis && trackAnalysis.nSeg > 0) {
       var ta = trackAnalysis;
-      var sIdx = binarySearchTime(ta.segStart, ta.nSeg, posSec);
-      var sElapsed = Math.max(0, posSec - ta.segStart[sIdx]);
-      var sDur = Math.max(0.04, ta.segDur[sIdx]);
-      var maxT = Math.max(0.01, ta.segLoudMaxTime[sIdx]);
+      var lastSegEnd = ta.segStart[ta.nSeg - 1] + (ta.segDur[ta.nSeg - 1] || 1);
+      if (posSec >= 0 && posSec <= lastSegEnd + 2.5) {
+        hasValidSegment = true;
+        var sIdx = binarySearchTime(ta.segStart, ta.nSeg, posSec);
+        var sElapsed = Math.max(0, posSec - ta.segStart[sIdx]);
+        var sDur = Math.max(0.04, ta.segDur[sIdx]);
+        var maxT = Math.max(0.01, ta.segLoudMaxTime[sIdx]);
 
-      var db = ta.segLoudMax[sIdx];
-      if (sElapsed < maxT) {
-        var rUp = sElapsed / maxT;
-        db = ta.segLoudStart[sIdx] + (ta.segLoudMax[sIdx] - ta.segLoudStart[sIdx]) * rUp;
-      } else {
-        var nextLoud = sIdx + 1 < ta.nSeg ? ta.segLoudStart[sIdx + 1] : -35;
-        var rDown = Math.min(1, (sElapsed - maxT) / Math.max(0.02, sDur - maxT));
-        db = ta.segLoudMax[sIdx] + (nextLoud - ta.segLoudMax[sIdx]) * rDown;
-      }
+        var db = ta.segLoudMax[sIdx];
+        if (sElapsed < maxT) {
+          var rUp = sElapsed / maxT;
+          db = ta.segLoudStart[sIdx] + (ta.segLoudMax[sIdx] - ta.segLoudStart[sIdx]) * rUp;
+        } else {
+          var nextLoud = sIdx + 1 < ta.nSeg ? ta.segLoudStart[sIdx + 1] : -35;
+          var rDown = Math.min(1, (sElapsed - maxT) / Math.max(0.02, sDur - maxT));
+          db = ta.segLoudMax[sIdx] + (nextLoud - ta.segLoudMax[sIdx]) * rDown;
+        }
 
-      var loudNorm = Math.max(0, Math.min(1, (db + 36) / 34));
-      var loudDrop = Math.max(0, (ta.segLoudMax[sIdx] - ta.segLoudStart[sIdx]) / 18);
-      var rawBass = Math.max(0, Math.min(1.35, loudNorm * (0.75 + 0.55 * Math.max(0, ta.segBass[sIdx])) + loudDrop * 0.25));
-      var rawHigh = Math.max(0, Math.min(1.25, loudNorm * (0.65 + 0.5 * Math.abs(ta.segSharp[sIdx]))));
+        var loudNorm = Math.max(0.12, Math.min(1, (db + 38) / 34));
+        var loudDrop = Math.max(0, (ta.segLoudMax[sIdx] - ta.segLoudStart[sIdx]) / 16);
+        var rawBass = Math.max(0.08, Math.min(1.35, loudNorm * (0.75 + 0.55 * Math.max(0, ta.segBass[sIdx])) + loudDrop * 0.28));
+        var rawHigh = Math.max(0.06, Math.min(1.25, loudNorm * (0.65 + 0.5 * Math.abs(ta.segSharp[sIdx]))));
 
-      if (ta.nBeat > 0) {
-        var bIdx = binarySearchTime(ta.beatStart, ta.nBeat, posSec);
-        var bElapsed = Math.max(0, posSec - ta.beatStart[bIdx]);
-        var bConf = ta.beatConf[bIdx];
-        if (bIdx !== lastBeatIdx && bElapsed < 0.09) {
-          lastBeatIdx = bIdx;
-          beatPulse = Math.max(beatPulse, (0.48 + 0.55 * bConf) * loudNorm);
-          if (rawBass > 0.65 && bConf > 0.5) {
-            throatOffsetX = (Math.random() - 0.5) * 28 * rawBass;
-            throatOffsetY = (Math.random() - 0.5) * 20 * rawBass;
-            edgeAngle = Math.random() * Math.PI * 2;
+        if (ta.nBeat > 0) {
+          var bIdx = binarySearchTime(ta.beatStart, ta.nBeat, posSec);
+          var bElapsed = Math.max(0, posSec - ta.beatStart[bIdx]);
+          var bConf = ta.beatConf[bIdx];
+          if (bIdx !== lastBeatIdx && bElapsed < 0.14) {
+            lastBeatIdx = bIdx;
+            beatPulse = Math.max(beatPulse, (0.52 + 0.55 * bConf) * loudNorm);
+            if (rawBass > 0.55 && bConf > 0.45) {
+              throatOffsetX = (Math.random() - 0.5) * 28 * rawBass;
+              throatOffsetY = (Math.random() - 0.5) * 20 * rawBass;
+              edgeAngle = Math.random() * Math.PI * 2;
+            }
           }
         }
-      }
 
-      if (ta.nBar > 0) {
-        var rIdx = binarySearchTime(ta.barStart, ta.nBar, posSec);
-        if (rIdx !== lastBarIdx && Math.abs(posSec - ta.barStart[rIdx]) < 0.12) {
-          lastBarIdx = rIdx;
-          barShock = Math.max(barShock, 0.88 * loudNorm);
-          triggerColorAdvance();
-          if (Math.random() < 0.45) spiralDir = -spiralDir;
+        if (ta.nBar > 0) {
+          var rIdx = binarySearchTime(ta.barStart, ta.nBar, posSec);
+          if (rIdx !== lastBarIdx && Math.abs(posSec - ta.barStart[rIdx]) < 0.16) {
+            lastBarIdx = rIdx;
+            barShock = Math.max(barShock, 0.88 * loudNorm);
+            triggerColorAdvance();
+            if (Math.random() < 0.45) spiralDir = -spiralDir;
+          }
+        }
+
+        smoothBass = smoothBass * 0.62 + rawBass * 0.38;
+        smoothMid = smoothMid * 0.7 + loudNorm * 0.3;
+        smoothHigh = smoothHigh * 0.66 + rawHigh * 0.34;
+        beatPulse *= 0.84;
+        barShock *= 0.88;
+
+        var pBase = sIdx * 12;
+        for (var p = 0; p < 12; p++) {
+          var pv = ta.segPitches[pBase + p];
+          var osc = Math.sin(posSec * (5.2 + p * 0.85) + p) * 0.18;
+          targetHarmonics[p] = ((pv - 0.28) + osc) * (0.6 + smoothBass * 1.2 + beatPulse * 0.9);
+          targetHarmonics[p + 12] = ((ta.segPitches[pBase + ((p + 5) % 12)] - 0.28) - osc) * (0.5 + smoothHigh * 1.2);
+        }
+        for (var h = 0; h < 24; h++) {
+          waveHarmonics[h] = waveHarmonics[h] * 0.58 + targetHarmonics[h] * 0.42;
         }
       }
+    }
 
-      smoothBass = smoothBass * 0.64 + rawBass * 0.36;
-      smoothMid = smoothMid * 0.72 + loudNorm * 0.28;
-      smoothHigh = smoothHigh * 0.68 + rawHigh * 0.32;
-      beatPulse *= 0.84;
-      barShock *= 0.88;
-
-      var pBase = sIdx * 12;
-      for (var p = 0; p < 12; p++) {
-        var pv = ta.segPitches[pBase + p];
-        targetHarmonics[p] = (pv - 0.32) * (0.55 + smoothBass * 1.15 + beatPulse * 0.85);
-        targetHarmonics[p + 12] = (ta.segPitches[pBase + ((p + 5) % 12)] - 0.32) * (0.45 + smoothHigh * 1.15);
-      }
-      for (var h = 0; h < 24; h++) {
-        waveHarmonics[h] = waveHarmonics[h] * 0.6 + targetHarmonics[h] * 0.4;
-      }
-    } else {
+    if (!hasValidSegment) {
       var t = nowMs * 0.001;
-      var gate = Math.max(0, Math.sin(t * 2.1) * Math.cos(t * 0.73 + 0.9));
-      var kick = Math.pow(Math.max(0, Math.sin(t * 6.4 + Math.sin(t * 1.3))), 6) * gate;
-      if (kick > 0.55 && beatPulse < 0.3) {
-        beatPulse = kick;
+      var gate = 0.28 + 0.72 * Math.max(0, Math.sin(t * 2.1) * Math.cos(t * 0.73 + 0.9));
+      var kick = Math.pow(Math.max(0, Math.sin(t * 6.4 + Math.sin(t * 1.3))), 5) * gate;
+      if (kick > 0.48 && beatPulse < 0.3) {
+        beatPulse = kick * 0.95;
         edgeAngle = Math.random() * Math.PI * 2;
         if (Math.random() < 0.25) triggerColorAdvance();
       }
-      smoothBass = smoothBass * 0.75 + (gate * 0.45 + kick * 0.65) * 0.25;
-      smoothMid = smoothMid * 0.8 + gate * 0.5 * 0.2;
-      smoothHigh = smoothHigh * 0.75 + Math.abs(Math.sin(t * 4.7)) * gate * 0.25;
+      smoothBass = smoothBass * 0.72 + (gate * 0.48 + kick * 0.7) * 0.28;
+      smoothMid = smoothMid * 0.78 + gate * 0.52 * 0.22;
+      smoothHigh = smoothHigh * 0.72 + (0.2 + Math.abs(Math.sin(t * 4.7)) * 0.65) * gate * 0.28;
       beatPulse *= 0.85;
       barShock *= 0.88;
       for (var j = 0; j < 24; j++) {
-        var v = Math.sin(t * (3.1 + j * 0.67) + j * 1.9) * (smoothBass * 0.65 + beatPulse * 0.55);
-        waveHarmonics[j] = waveHarmonics[j] * 0.65 + v * 0.35;
+        var v = Math.sin(t * (3.6 + j * 0.72) + j * 1.9) * (0.25 + smoothBass * 0.7 + beatPulse * 0.6);
+        waveHarmonics[j] = waveHarmonics[j] * 0.62 + v * 0.38;
       }
     }
   }
@@ -1056,7 +1086,7 @@
   }
 
   function renderScopeAndBarsModel(cx, cy, sat, totalActivity) {
-    ctx.fillStyle = "rgba(3, 4, 8, 0.32)";
+    ctx.fillStyle = "rgba(3, 4, 8, 0.34)";
     ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
 
     var nBars = 48;
@@ -1064,50 +1094,72 @@
     var usableW = INTERNAL_W - padX * 2;
     var slotW = usableW / nBars;
     var barW = Math.max(3, slotW - 3);
-    var baselineY = INTERNAL_H - 34;
-    var maxBarH = INTERNAL_H * 0.46;
+    var baselineY = INTERNAL_H - 30;
+    var maxBarH = INTERNAL_H * 0.48;
 
     for (var b = 0; b < nBars; b++) {
       var hIdx = b % 24;
-      var raw = Math.abs(waveHarmonics[hIdx]) * 1.4 + smoothBass * Math.max(0, 1 - b / 22) * 0.75 + beatPulse * 0.35;
-      var targetH = isMusicPlaying ? Math.min(maxBarH, raw * maxBarH * 0.85) : 3;
-      barValues[b] = barValues[b] * 0.62 + targetH * 0.38;
-      if (barValues[b] > barPeaks[b]) {
+      var freqFrac = b / (nBars - 1);
+      var bassWeight = Math.max(0, 1 - freqFrac * 1.55);
+      var midWeight = Math.max(0, 1 - Math.abs(freqFrac - 0.48) * 2.4);
+      var highWeight = Math.max(0, (freqFrac - 0.35) * 1.55);
+
+      var oscA = Math.abs(Math.sin(b * 0.62 - tunnelPhase * 1.85 + Math.cos(b * 0.27 + tunnelPhase * 0.9)));
+      var oscB = Math.abs(Math.cos(b * 1.18 + tunnelPhase * 2.45));
+      var harm = Math.abs(waveHarmonics[hIdx]) * 1.65;
+
+      var bandEnergy =
+        bassWeight * (smoothBass * 0.62 + beatPulse * 0.58) +
+        midWeight * (smoothMid * 0.48 + harm * 0.42) +
+        highWeight * (smoothHigh * 0.52 + harm * 0.38);
+
+      var dynamicMod = Math.pow(oscA * 0.58 + oscB * 0.42, 1.8) + harm * 0.35;
+      var raw = bandEnergy * dynamicMod + beatPulse * bassWeight * 0.28 * oscA;
+      var targetH = isMusicPlaying ? Math.min(maxBarH, Math.max(4, raw * maxBarH * 0.88)) : 3;
+
+      if (targetH > barValues[b]) {
+        barValues[b] = barValues[b] * 0.32 + targetH * 0.68;
+      } else {
+        barValues[b] = Math.max(3, barValues[b] * 0.68 + targetH * 0.32);
+      }
+
+      if (barValues[b] >= barPeaks[b]) {
         barPeaks[b] = barValues[b];
       } else {
-        barPeaks[b] = Math.max(0, barPeaks[b] - 1.25);
+        barPeaks[b] = Math.max(3, barPeaks[b] - 2.1);
       }
 
       var bx = padX + b * slotW;
       var bh = Math.max(2, barValues[b]);
-      var bHue = (currentHue + (b / nBars) * 45) % 360;
+      var bHue = (currentHue + freqFrac * 52) % 360;
 
       var grad = ctx.createLinearGradient(0, baselineY - bh, 0, baselineY);
-      grad.addColorStop(0, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 72%, 0.95)");
-      grad.addColorStop(1, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 32%, 0.75)");
+      grad.addColorStop(0, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 74%, 0.96)");
+      grad.addColorStop(0.55, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 52%, 0.88)");
+      grad.addColorStop(1, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 28%, 0.75)");
       ctx.fillStyle = grad;
       ctx.fillRect(bx, baselineY - bh, barW, bh);
 
-      ctx.fillStyle = "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 88%, 0.95)";
-      ctx.fillRect(bx, baselineY - barPeaks[b] - 3, barW, 2.2);
+      ctx.fillStyle = "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 90%, 0.98)";
+      ctx.fillRect(bx, baselineY - barPeaks[b] - 3.5, barW, 2.2);
     }
 
     ctx.globalCompositeOperation = "lighter";
-    var waveY = INTERNAL_H * 0.34;
+    var waveY = INTERNAL_H * 0.28;
     for (var ch = 0; ch < 2; ch++) {
-      var chHue = (currentHue + ch * 24) % 360;
+      var chHue = (currentHue + ch * 26) % 360;
       ctx.beginPath();
       for (var i = 0; i <= VERTEX_COUNT; i++) {
         var x = (i / VERTEX_COUNT) * INTERNAL_W;
         var hVal = waveHarmonics[(i + ch * 7) % 24];
         var env = Math.sin((i / VERTEX_COUNT) * Math.PI);
         var dy =
-          (Math.sin(i * 0.38 + tunnelPhase * (ch === 0 ? 1.4 : -1.2)) * 0.55 +
-            Math.cos(i * 1.15 - tunnelPhase * 2.1) * 0.35 +
-            hVal * 1.3) *
+          (Math.sin(i * 0.38 + tunnelPhase * (ch === 0 ? 1.55 : -1.35)) * 0.58 +
+            Math.cos(i * 1.15 - tunnelPhase * 2.25) * 0.38 +
+            hVal * 1.45) *
           totalActivity *
           env *
-          68;
+          72;
         var y = waveY + dy;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
