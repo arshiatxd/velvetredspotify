@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="#-installation"><img src="https://img.shields.io/badge/Installer-Ready-crimson.svg?style=flat-square" alt="Installer Ready" /></a>
+  <a href="#-installation-guide"><img src="https://img.shields.io/badge/Installer-Ready-crimson.svg?style=flat-square" alt="Installer Ready" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-darkred.svg?style=flat-square" alt="License" /></a>
   <a href="https://github.com/arshiatxd/velvetredspotify"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg?style=flat-square" alt="Windows 10/11" /></a>
 </p>
@@ -58,23 +58,57 @@
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation Guide
 
-### Option 1: Standalone Setup Installer (Recommended)
-1. Download **[`Spotify_VelvetRed_Setup.exe`](Spotify_VelvetRed_Setup.exe)** from this repository.
-2. Run `Spotify_VelvetRed_Setup.exe`.
-3. Click **Install & Launch Spotify**.
-   - The installer closes any running Spotify process, backs up your original `xpui.spa`, installs the Velvet Red theme and WMP Tunnel Visualizer, updates shortcut icons, and launches Spotify automatically.
+> **⚠️ Important Prerequisite — Install Official Spotify Desktop First:**
+> `Spotify_VelvetRed_Setup.exe` (`~10 MB`) is a **UI & Visualizer Mod Installer** that patches Spotify's frontend package (`%APPDATA%\Spotify\Apps\xpui.spa`). It does **not** bundle the `180+ MB` proprietary Spotify audio engine.
+> - You must have the **official Windows Desktop version of Spotify** (downloaded from [spotify.com/download/windows](https://www.spotify.com/download/windows/), **not** the Microsoft Store version) installed on your PC before running this setup.
 
-*Silent installation is also supported via command line:*
+---
+
+### Step-by-Step Setup (Recommended)
+
+1. **Install Official Spotify (if not already installed)**:
+   - Download and install Spotify Desktop from [spotify.com/download/windows](https://www.spotify.com/download/windows/) and log into your account at least once so `%APPDATA%\Spotify\Apps\xpui.spa` is created.
+2. **Download the Velvet Red Installer**:
+   - Download **[`Spotify_VelvetRed_Setup.exe`](Spotify_VelvetRed_Setup.exe)** from this repository (click on `Spotify_VelvetRed_Setup.exe` in the file list above, then click **Download raw file**).
+3. **Run `Spotify_VelvetRed_Setup.exe`**:
+   - Double-click `Spotify_VelvetRed_Setup.exe`. *(If Windows SmartScreen appears because the `.exe` is self-compiled, click **More info** → **Run anyway**).*
+4. **Click `Install & Launch Spotify`**:
+   - The installer will automatically:
+     1. Close any running Spotify processes.
+     2. Back up your original `xpui.spa` to `%APPDATA%\Spotify\Apps\xpui.spa.bak`.
+     3. Install the **Velvet Red Aero Glass theme** and **5-Model WMP Visualizer Studio**.
+     4. Apply the custom Velvet Red `.ico` icon to your Desktop, Start Menu, and Taskbar shortcuts and refresh the Windows icon cache.
+     5. Relaunch Spotify automatically.
+
+*Silent / unattended installation is also supported via PowerShell or Command Prompt:*
 ```cmd
 Spotify_VelvetRed_Setup.exe /S
 ```
 
-### Option 2: Restore Original Spotify UI
-If you ever want to revert back to default Spotify:
-1. Run `Spotify_VelvetRed_Setup.exe`.
-2. Click **Restore Backup**.
+---
+
+### 🎮 How to Use the Visualizer Studio
+
+- **Dedicated Visualizer Surface Screen**:
+  - Click the **Vortex icon** (`◎`) in the bottom-right player bar (right next to the Lyrics microphone icon) to open the full Visualizer Studio Surface.
+  - Use the top **Customization Bar** to switch between **`XP Tunnel`**, **`Spiral Vortex`**, **`WMC Starburst`**, **`Scope & Bars`**, and **`Cyber Orb`**.
+  - Drag anywhere on the **RGB Color Wheel** to pick a custom color, or check **`RGB Rotation`** to let the colors cycle automatically with the music rhythm.
+  - Click **`Fullscreen`** (or press `F11`) for a 100% full-monitor visualizer experience (`Esc` to exit).
+- **Lyrics Screen Visualizer (On/Off)**:
+  - Open the normal **Lyrics** screen (`🎤` button).
+  - Use the **`Visualizer: ON / OFF`** button in the top-right corner to toggle the background visualizer and customization bar on or off while reading lyrics.
+
+---
+
+### 🔄 Restoring Default Spotify / After Spotify Updates
+
+- **To Uninstall / Revert to Default Spotify**:
+  1. Run `Spotify_VelvetRed_Setup.exe`.
+  2. Click **Restore Backup** — your original `xpui.spa.bak` and default icons are restored immediately.
+- **If Spotify Auto-Updates**:
+  - When Spotify updates itself in the background, it overwrites `xpui.spa` with the default UI. Simply run `Spotify_VelvetRed_Setup.exe` and click **Install & Launch Spotify** again to re-apply the Velvet Red Edition in 2 seconds.
 
 ---
 
