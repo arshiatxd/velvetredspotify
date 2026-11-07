@@ -17,6 +17,10 @@
 
 <br>
 
+<p align="center">
+  <img src="assets/screenshots/home_view.png" width="100%" alt="Spotify Velvet Red Edition Home View" />
+</p>
+
 ---
 
 ## ✨ Features
@@ -55,6 +59,26 @@
 - **Custom Multi-Resolution Application Icon**:
   - High-fidelity Windows `.ico` containing 16x16, 24x24, 32x32, 48x48, 64x64, 128x128 (32-bit BGRA DIB + 1-bit AND mask), and 256x256 (PNG).
   - Bound to Desktop, Start Menu, and Taskbar shortcuts without modifying `Spotify.exe` (maintains digital signature verification).
+
+---
+
+## 📸 Visualizer Studio & Theme Gallery
+
+| **XP Tunnel** | **Spiral Vortex** |
+| :---: | :---: |
+| <img src="assets/screenshots/xp_tunnel.png" width="100%" alt="XP Tunnel Visualizer" /> | <img src="assets/screenshots/spiral_vortex.png" width="100%" alt="Spiral Vortex Visualizer" /> |
+
+| **WMC Starburst** | **Scope & Bars** |
+| :---: | :---: |
+| <img src="assets/screenshots/wmc_starburst.png" width="100%" alt="WMC Starburst Visualizer" /> | <img src="assets/screenshots/scope_and_bars.png" width="100%" alt="Scope & Bars Visualizer" /> |
+
+| **Cyber Orb** | **Fullscreen Studio Mode** |
+| :---: | :---: |
+| <img src="assets/screenshots/cyber_orb.png" width="100%" alt="Cyber Orb Visualizer" /> | <img src="assets/screenshots/fullscreen_visualizer.png" width="100%" alt="Fullscreen Visualizer" /> |
+
+| **Lyrics Screen Integration** | **Artist View & Glass Controls** |
+| :---: | :---: |
+| <img src="assets/screenshots/lyrics_visualizer.png" width="100%" alt="Lyrics Screen Visualizer" /> | <img src="assets/screenshots/artist_view.png" width="100%" alt="Artist View" /> |
 
 ---
 
