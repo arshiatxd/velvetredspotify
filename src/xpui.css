@@ -265,6 +265,12 @@ body,
     0 4px 14px rgba(196, 30, 58, 0.55) !important;
 }
 
+#main button[data-testid="play-button"] svg,
+#main .encore-bright-accent-set button[data-encore-id="buttonPrimary"] svg {
+  fill: #ffffff !important;
+  color: #ffffff !important;
+}
+
 #main button[data-testid="play-button"]:hover .e-101040-button-primary__inner,
 #main .encore-bright-accent-set .e-101040-button-primary:hover .e-101040-button-primary__inner {
   background: radial-gradient(circle at 35% 28%, #ff829b 0%, #ff2e55 46%, #b8112d 86%, #7d0b20 100%) !important;
@@ -361,8 +367,9 @@ body,
   flex-direction: row !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 10px !important;
+  gap: 12px !important;
   margin-bottom: 6px !important;
+  min-height: 42px !important;
 }
 
 #main aside[data-testid="now-playing-bar"] .Dc4P_eCrAgY2MI9ozGCD,
@@ -373,40 +380,71 @@ body,
 }
 
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"] {
-  width: 40px !important;
-  height: 40px !important;
-  min-width: 40px !important;
-  min-height: 40px !important;
+  width: 42px !important;
+  height: 42px !important;
+  min-width: 42px !important;
+  min-height: 42px !important;
+  min-inline-size: 42px !important;
+  min-block-size: 42px !important;
+  padding: 0 !important;
   border-radius: 50% !important;
-  background: radial-gradient(circle at 35% 24%, #ff859d 0%, #e02046 38%, #9e0b22 78%, #680b1c 100%) !important;
+  background: radial-gradient(circle at 50% 62%, #e61e45 0%, #9b0b24 54%, #450310 100%) !important;
   color: #ffffff !important;
-  border: 1px solid rgba(255, 210, 222, 0.55) !important;
+  border: 1.5px solid rgba(255, 205, 218, 0.64) !important;
   box-shadow:
-    inset 0 2px 4px rgba(255, 240, 245, 0.62),
-    inset 0 -3px 6px rgba(45, 0, 12, 0.65),
+    inset 0 2px 4px rgba(255, 235, 242, 0.58),
+    inset 0 -3px 6px rgba(32, 0, 8, 0.72),
     0 2px 12px rgba(224, 32, 70, 0.55),
-    0 4px 10px rgba(0, 0, 0, 0.60) !important;
+    0 4px 10px rgba(0, 0, 0, 0.65) !important;
   position: relative !important;
   overflow: hidden !important;
-  transition: transform 0.14s ease, box-shadow 0.14s ease !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease !important;
 }
 
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"]::before {
   content: "" !important;
   position: absolute !important;
   top: 2px !important;
-  left: 16% !important;
-  right: 16% !important;
-  height: 44% !important;
+  left: 15% !important;
+  right: 15% !important;
+  height: 42% !important;
   border-radius: 50% !important;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 100%) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.44) 0%, rgba(255, 255, 255, 0.08) 65%, rgba(255, 255, 255, 0) 100%) !important;
   pointer-events: none !important;
+  z-index: 1 !important;
+}
+
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"] .e-101040-button-primary__inner,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"] .encore-inverted-light-set,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"] > span {
+  --background-base: transparent !important;
+  --background-highlight: transparent !important;
+  --background-press: transparent !important;
+  --text-base: #ffffff !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-inline-size: 0 !important;
+  min-block-size: 0 !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"]:hover {
   transform: scale(1.06) !important;
+  border-color: rgba(255, 232, 240, 0.88) !important;
   box-shadow:
     inset 0 2px 5px rgba(255, 245, 248, 0.72),
+    inset 0 -3px 6px rgba(45, 0, 12, 0.65),
     0 0 18px rgba(255, 77, 109, 0.78),
     0 4px 12px rgba(0, 0, 0, 0.65) !important;
 }
@@ -418,34 +456,60 @@ body,
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-playpause"] svg {
   fill: #ffffff !important;
   color: #ffffff !important;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)) !important;
+  position: relative !important;
+  z-index: 2 !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.72)) !important;
 }
 
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-back"],
-#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-forward"] {
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-forward"],
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-seek-back-15"],
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-seek-forward-15"] {
   width: 34px !important;
   height: 34px !important;
   min-width: 34px !important;
   min-height: 34px !important;
+  min-inline-size: 34px !important;
+  min-block-size: 34px !important;
+  padding: 0 !important;
   border-radius: 50% !important;
-  background: radial-gradient(circle at 35% 24%, rgba(255, 130, 155, 0.36) 0%, rgba(160, 20, 48, 0.56) 46%, rgba(62, 7, 20, 0.85) 100%) !important;
+  background: radial-gradient(circle at 50% 25%, rgba(255, 195, 210, 0.24) 0%, rgba(126, 14, 38, 0.62) 48%, rgba(26, 4, 10, 0.92) 100%) !important;
   color: #f8e8ec !important;
-  border: 1px solid rgba(255, 180, 200, 0.34) !important;
+  border: 1px solid rgba(255, 185, 205, 0.36) !important;
   box-shadow:
     inset 0 1px 2px rgba(255, 225, 235, 0.42),
-    inset 0 -2px 4px rgba(20, 0, 6, 0.55),
+    inset 0 -2px 4px rgba(20, 0, 6, 0.60),
     0 2px 8px rgba(0, 0, 0, 0.45) !important;
-  transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease !important;
 }
 
-#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-back"]:hover,
-#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-forward"]:hover {
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-back"] > span,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-forward"] > span,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-seek-back-15"] > span,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-seek-forward-15"] > span {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-back"]:not(:disabled):hover,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-forward"]:not(:disabled):hover,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-seek-back-15"]:not(:disabled):hover,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-seek-forward-15"]:not(:disabled):hover {
   transform: scale(1.06) !important;
   color: #ffffff !important;
-  border-color: rgba(255, 195, 210, 0.62) !important;
+  border-color: rgba(255, 205, 220, 0.72) !important;
   box-shadow:
-    inset 0 1px 3px rgba(255, 235, 240, 0.52),
-    0 0 12px rgba(224, 32, 70, 0.55) !important;
+    inset 0 1px 3px rgba(255, 235, 240, 0.56),
+    0 0 12px rgba(224, 32, 70, 0.58) !important;
+}
+
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-back"]:disabled,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-skip-forward"]:disabled {
+  opacity: 0.40 !important;
 }
 
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-shuffle"],
@@ -454,18 +518,29 @@ body,
   width: 32px !important;
   height: 32px !important;
   min-width: 32px !important;
+  min-height: 32px !important;
+  min-inline-size: 32px !important;
+  min-block-size: 32px !important;
+  padding: 0 0 3px 0 !important;
   border-radius: 50% !important;
-  color: rgba(245, 215, 222, 0.72) !important;
+  color: rgba(245, 215, 222, 0.74) !important;
   background: transparent !important;
   border: 1px solid transparent !important;
+  overflow: visible !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
 }
 
-#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-shuffle"]:hover,
-#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-repeat"]:hover,
-#main aside[data-testid="now-playing-bar"] .y8jg8B61IwA_Q9obcAZL:hover {
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-shuffle"]:not(:disabled):hover,
+#main aside[data-testid="now-playing-bar"] button[data-testid="control-button-repeat"]:not(:disabled):hover,
+#main aside[data-testid="now-playing-bar"] .y8jg8B61IwA_Q9obcAZL:hover,
+#main aside[data-testid="now-playing-bar"] .vQrn40NmmpeUfmOfgxeo button:hover {
   color: #ffffff !important;
-  background: rgba(255, 77, 109, 0.14) !important;
+  background: rgba(255, 77, 109, 0.16) !important;
   border-color: rgba(255, 160, 180, 0.25) !important;
+  border-radius: 50% !important;
 }
 
 #main aside[data-testid="now-playing-bar"] .y8jg8B61IwA_Q9obcAZL.Tjk9xHexUrsjejB5PBbF,
@@ -475,16 +550,18 @@ body,
 #main aside[data-testid="now-playing-bar"] button[data-testid="control-button-repeat"][aria-checked="mixed"],
 #main aside[data-testid="now-playing-bar"] button[data-testid="lyrics-button"][data-active="true"],
 #main aside[data-testid="now-playing-bar"] button[aria-pressed="true"]:not([data-testid="control-button-playpause"]) {
-  color: #ff4d6d !important;
-  filter: drop-shadow(0 0 6px rgba(255, 77, 109, 0.55)) !important;
+  color: #ff5c7c !important;
 }
 
 #main aside[data-testid="now-playing-bar"] .y8jg8B61IwA_Q9obcAZL.OJsKOflU3SmUHnQ5_QKE::after,
 #main aside[data-testid="now-playing-bar"] .KsFFqA0rrkzL3H4DOkYC::before,
 #main aside[data-testid="now-playing-bar"] .rVP4Py0UWqb62dKlro_h::before,
 #main aside[data-testid="now-playing-bar"] .A6OB2PW88hienapJaToK::after {
-  background-color: #ff4d6d !important;
-  box-shadow: 0 0 6px #ff4d6d !important;
+  background-color: #ff5c7c !important;
+  box-shadow: 0 0 6px #ff5c7c !important;
+  bottom: -1px !important;
+  width: 4px !important;
+  height: 4px !important;
 }
 
 #main aside[data-testid="now-playing-bar"] .mqxKTlEZSgZ7waDd3Kl7 .f42lbbUT05gjuREF86Hw,
@@ -777,6 +854,11 @@ html.wmp-lyrics-viz-active .J4_kkGYm5hjbZlztykxr.y45YX8smwP4lW13IQulz:hover {
   font-weight: 700;
   padding: 2px 7px;
   border-radius: 10px;
+}
+
+#wmp-sensitivity-select option {
+  background: #1a040a;
+  color: #f8e8ec;
 }
 
 #wmp-sensitivity-select option {

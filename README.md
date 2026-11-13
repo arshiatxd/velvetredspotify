@@ -31,32 +31,31 @@
   - Ruby acrylic sidebar panels, glossy 3D filter capsules, and translucent tracklist selection highlights.
   - Clean, borderless top navigation arrows without distorted oval boundaries.
   
-- **Symmetrically Centered WMP 11 Transport Controls**:
-  - Centerpiece 3D Glass Jewel Play/Pause Orb (`40px × 40px`).
-  - Circular Ruby Satellite Previous & Next buttons (`34px × 34px`).
-  - Flush Shuffle and Repeat controls.
-  - All transport buttons share an exact vertical centerline (`centerY = 918px`) and uniform `10px` horizontal spacing.
-
-- **WMP Multi-Model Visualizer Studio**:
-  - **5 Selectable Visualizer Models**:
-    1. **XP Tunnel**: Classic Windows XP Media Player 6-strand electric oscilloscope tunnel with crisp radial zoom feedback.
-    2. **Spiral Vortex**: Logarithmic multi-arm spiral galaxy with beat-reactive waveform modulation.
-    3. **WMC Starburst**: Windows Media Center organic multi-lobe harmonic ribbons with edge palpitation.
-    4. **Scope & Bars**: 48-band mirrored spectrum analyzer paired with dual-channel glowing oscilloscope waveforms.
-    5. **Cyber Orb**: Concentric plasma rings with 36-spoke radial audio spikes and core bass glow.
+- **WMP 11 3D Glass Jewel Transport Controls (`1.3.9.2055` Fix)**:
+  - Centerpiece `42px × 42px` WMP 11 3D Crimson Glass Jewel Play/Pause Orb with crisp `#ffffff` glyphs (bypasses Spotify `1.3.9.2055` Encore inverted-light overlay fill).
+  - Circular Smoked Chrome-Ruby Skip Back & Skip Forward spheres (`34px × 34px`).
+  - Clean circular hovers, high-contrast active Shuffle/Repeat indicators without icon blur, and sharp playlist/card Play buttons.
+  
+- **WMP Multi-Model Visualizer Studio (Overhauled Retro Edition)**:
+  - **5 High-Energy Beat-Driven Visualizer Models** (powered by kick/snare transient detection, shockwaves, camera shake, kinetic echo feedback, and a 96-particle spark system):
+    1. **XP Tunnel**: Aggressive radial sawtooth oscilloscope waves (`XP` Media Player style) with beat-triggered expanding shock rings, laser sparks, and zoom-trailing glow.
+    2. **Spiral Vortex**: High-torque jagged lightning spiral arms bursting out of an intense core reactor with radial spark flares.
+    3. **WMC Starburst**: Layered concentric multi-lobe harmonic petals expanding outward in full chromatic feedback.
+    4. **Scope & Bars**: Mirrored 48-band segmented retro VU spectrum analyzer with sticky peak caps, dual-channel spiked oscilloscope waveforms, and vertical kinetic trails.
+    5. **Cyber Orb**: Scrolling retro perspective grid horizon beneath a solar plasma orb, beat-reactive lightning coronas, and dual wave ribbons.
   - **Interactive Color Studio**:
     - **RGB Color Wheel Picker**: Click or drag anywhere on the 2D HSV/RGB color wheel in the Visualizer Surface Studio Bar to set a custom hue and saturation.
     - **RGB Color Rotation Checkbox**: Enable continuous rhythm-driven RGB hue rotation or uncheck to lock in your exact chosen color from the RGB wheel.
-  - **Dual Viewing Modes + Fullscreen Option**:
+  - **Dual Viewing Modes + Seamless Navigation & Fullscreen**:
     1. **Lyrics Screen (with On/Off Toggle)**: Renders directly behind Spotify lyrics (`z-index` layered so lyrics stay bright and legible above the animation) with a non-overlapping **`Visualizer: ON / OFF`** pill in the Lyrics top bar.
-    2. **Dedicated Visualizer Surface Screen (+ Fullscreen Mode)**: Toggle via the equalizer icon in the bottom-right player bar (or `Alt+V`) for an unobstructed canvas with model pills, RGB Color Wheel, RGB Rotation toggle, **`Sensitivity`** (`Subtle` / `Balanced` / `Overdrive`), live **BPM / 3-Band badge & Beat LED**, **`Fullscreen`** (`F` / `Esc`), and track HUD. Navigating to Lyrics automatically exits Surface Mode.
+    2. **Dedicated Visualizer Surface Screen (+ Fullscreen Mode)**: Toggle via the equalizer icon in the bottom-right player bar (or `Alt+V`) for an unobstructed canvas with model pills, RGB Color Wheel, RGB Rotation toggle, **`Sensitivity`** (`Subtle` / `Balanced` / `Overdrive`), live **BPM / 3-Band badge & Beat LED**, **`Fullscreen`** (`F` / `Esc`), and track HUD. Clicking `Back`, `Forward`, `Home`, `Search`, `Browse`, `Lyrics`, sidebar playlists, or artist/track links seamlessly exits Surface Mode via `Platform.getHistory()`.
   - **Native 3-Band Waveform & BPM Sync (`1.3.9.2055`)**: Decodes Spotify's protobuf `MetadataExtensions` (`THREEBAND_WAVEFORMS`, `AUDIO_ATTRIBUTES_V2`, `BEATS`, `LIST_TUNER_AUDIO_ANALYSIS`) alongside `PlayerAPI` and playback clock synchronization. Tempo and beat pulses start automatically on load without manual seekbar interaction.
 
 - **SpotX-First Lightweight Single-File Installer**:
-  - Compact `~224 KB` standalone `.exe` that strips dead stock bundles, installs/updates **SpotX** first when missing or requested, and injects gzip-compressed Velvet Red assets in-place into `xpui.spa`.
+  - Compact `~229 KB` standalone `.exe` that strips dead stock bundles, installs/updates **SpotX** first when missing or requested, and injects gzip-compressed Velvet Red assets in-place into `xpui.spa`.
 
 - **Ultra-Low RAM & Zero Background Overhead**:
-  - DPR-capped 2D Canvas buffers with pre-allocated `Float32Array` geometry and zero GC churn inside the render loop.
+  - DPR-capped 2D Canvas buffers with pre-allocated `Float32Array` geometry & typed spark buffers with zero GC churn inside the render loop.
   - Completely halts rendering (`cancelAnimationFrame`) and hides the canvas outside the Lyrics screen and Visualizer Surface screen (or when toggled `OFF`).
 
 - **Custom Multi-Resolution Application Icon**:
@@ -87,7 +86,7 @@
 ## 🚀 Installation Guide
 
 > **Important Prerequisite — Install Official Spotify Desktop First:**
-> `Spotify_VelvetRed_Setup.exe` (`~224 KB`) runs **SpotX** and patches Spotify's frontend (`%APPDATA%\Spotify\Apps\xpui.spa`) in-place. It does **not** redistribute Spotify's desktop runtime binaries.
+> `Spotify_VelvetRed_Setup.exe` (`~229 KB`) runs **SpotX** and patches Spotify's frontend (`%APPDATA%\Spotify\Apps\xpui.spa`) in-place. It does **not** redistribute Spotify's desktop runtime binaries.
 > - Install the **official Windows Desktop version of Spotify** (`1.3.9.2055`, downloaded from [spotify.com/download/windows](https://www.spotify.com/download/windows/), not the Microsoft Store edition) before running setup.
 
 ---
@@ -139,9 +138,11 @@ Spotify_VelvetRed_Setup.exe /S /RESTORE
 ## 📋 Patch Notes — v1.3.9.2055 Update
 
 - **Full Spotify `1.3.9.2055` Compatibility**: Updated CSS selectors and Lyrics stacking context (`.R1kU6b2KxZc8FWfbYf3m`, `.f42lbbUT05gjuREF86Hw`, `.ISEJ4fISQcRgNTF5dVAA`, `.wYWhVPZoG93lR7ogMIug`, `.Ii0P5lvVrAzHgsutQTVz`) for Spotify Desktop `1.3.9.2055`.
-- **SpotX-First Installer Overhaul**: Added automatic SpotX pre-installation (`/SPOTX`), non-interactive execution guards, and safe in-place `xpui.spa` patching (stripped legacy bloat to shrink `Spotify_VelvetRed_Setup.exe` from ~10 MB to `229 KB`).
+- **Playback Button Contrast & Alignment Fix (`1.3.9.2055`)**: Fixed the Encore `invertedLight` inner span overlay (`button[data-testid="control-button-playpause"]`) that obscured the Play/Pause glyph, styled Skip Back/Forward as `34px × 34px` smoked crimson glass spheres, restored white SVG contrast on primary play buttons, and cleanly separated active Shuffle/Repeat indicators.
+- **Seamless Visualizer Surface Navigation**: Connected `Platform.getHistory()` listener and capture-phase click/focus guards so clicking `Back`, `Forward`, `Home`, `Search`, `Browse`, `Lyrics`, Left Sidebar items, or now-playing links immediately exits Visualizer Surface Mode and Fullscreen without getting stuck behind the canvas.
+- **Aggressive Retro WMP Visualizer Overhaul**: Overhauled all 5 models (`XP Tunnel`, `Spiral Vortex`, `WMC Starburst`, `Scope & Bars`, `Cyber Orb`) with kick/snare transient shockwaves, beat-driven camera shake, shared zoom/motion feedback trails, and zero-GC `Float32Array` 96-particle radial spark bursts.
+- **SpotX-First Installer Overhaul**: Added automatic SpotX pre-installation (`/SPOTX`), non-interactive execution guards, and safe in-place `xpui.spa` patching (`233,984 bytes`).
 - **Native 3-Band Waveform & Auto-Tempo Engine**: Migrated to Spotify `1.3.9.2055` protobuf `MetadataExtensions` (`THREEBAND_WAVEFORMS`, `AUDIO_ATTRIBUTES_V2`, `BEATS`, `LIST_TUNER_AUDIO_ANALYSIS`) with `PlayerAPI` + DOM clock sync so BPM and reactivity engage automatically without seekbar clicks.
-- **5-Model Accuracy & HUD Fixes**: Rebuilt `Scope & Bars` 48-band FFT dynamics, added Beat LED, BPM/source pill, Sensitivity selector (`Subtle`/`Balanced`/`Overdrive`), zero-overlap topbar flex HUD, Lyrics text z-index foreground clarity, and `rAF`-coalesced `MutationObserver` updates.
 
 ---
 
@@ -161,7 +162,7 @@ Spotify_VelvetRed_Setup.exe /S /RESTORE
 | **Theme Layer** | Aero Glass & Velvet Red CSS (`src/xpui.css` → `/velvet-red.css`) |
 | **Visualizer Engine** | 5-Model 2D Canvas Studio with Protobuf `MetadataExtensions` (`src/lyrics-visualizer.js` → `/lyrics-visualizer.js`) |
 | **Icon Resource** | Multi-res `.ico` (`assets/spotify-final.ico` → `%APPDATA%\Spotify\velvet_red.ico`) |
-| **Installer** | Standalone C# WinForms single-file executable (`229,888 bytes`) |
+| **Installer** | Standalone C# WinForms single-file executable (`233,984 bytes`) |
 
 ---
 

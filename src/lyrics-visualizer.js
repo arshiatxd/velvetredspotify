@@ -11,9 +11,9 @@
   ];
 
   const SENSITIVITY_MAP = {
-    subtle: 0.72,
-    balanced: 1.08,
-    overdrive: 1.52
+    subtle: 0.78,
+    balanced: 1.24,
+    overdrive: 1.78
   };
 
   const STORE_KEYS = {
@@ -64,6 +64,9 @@
     phase: 0,
     spiralPhase: 0,
     tunnelPhase: 0,
+    driftPhase: 0,
+    spinDir: 1,
+    spinVel: 1,
     lastPath: location.pathname,
     wasLyricsRoute: false
   };
@@ -101,28 +104,47 @@
     onsets: null
   };
 
+  const SPK_COUNT = 96;
+  const spkX = new Float32Array(SPK_COUNT);
+  const spkY = new Float32Array(SPK_COUNT);
+  const spkVx = new Float32Array(SPK_COUNT);
+  const spkVy = new Float32Array(SPK_COUNT);
+  const spkLife = new Float32Array(SPK_COUNT);
+  const spkMaxLife = new Float32Array(SPK_COUNT);
+  const spkHue = new Float32Array(SPK_COUNT);
+  let spkCursor = 0;
+
   const meter = {
     bass: 0,
     mid: 0,
     high: 0,
     energy: 0,
     beatPulse: 0,
+    kick: 0,
+    snare: 0,
+    shock: 0,
+    shakeX: 0,
+    shakeY: 0,
     prevRawBass: 0,
+    prevRawMid: 0,
     flux: 0,
     avgFlux: 0.05,
     lastBeatIndex: -1,
     lastOnsetWallMs: 0,
     bins: new Float32Array(48),
     peaks: new Float32Array(48),
-    wave: new Float32Array(128)
+    wave: new Float32Array(128),
+    waveB: new Float32Array(128)
   };
 
   const apis = {
     player: null,
     platform: null,
+    history: null,
     requestBuilder: null,
     metadataExtensions: null,
     playerListenerBound: false,
+    historyListenerBound: false,
     lastScanMs: 0
   };
 
@@ -246,6 +268,14 @@
         } catch {}
       }
 
+      if (apis.platform && !apis.history) {
+        try {
+          if (typeof apis.platform.getHistory === "function") {
+            apis.history = apis.platform.getHistory();
+          }
+        } catch {}
+      }
+
       if (apis.platform && !apis.metadataExtensions) {
         try {
           const reg = apis.platform.getRegistry();
@@ -255,13 +285,46 @@
         } catch {}
       }
 
-      if (apis.player && apis.requestBuilder && apis.metadataExtensions) break;
+      if (apis.player && apis.requestBuilder && apis.metadataExtensions && apis.history) break;
 
       if (node.child) queue.push(node.child);
       if (node.sibling) queue.push(node.sibling);
     }
 
     bindPlayerEvents();
+    bindHistoryEvents();
+  }
+
+  function exitSurfaceMode(keepFullscreen) {
+    if (!runtime.surfaceMode && (!runtime.isFullscreen || keepFullscreen)) return;
+    runtime.surfaceMode = false;
+    if (!keepFullscreen && runtime.isFullscreen) {
+      toggleFullscreen();
+    } else {
+      updateVisibilityAndLayout();
+    }
+  }
+
+  function bindHistoryEvents() {
+    if (apis.historyListenerBound || !apis.history || typeof apis.history.listen !== "function") return;
+    try {
+      const initLoc = apis.history.location;
+      if (initLoc && initLoc.pathname) {
+        runtime.lastPath = initLoc.pathname;
+      }
+      apis.history.listen((loc) => {
+        const nextPath = loc && loc.pathname ? loc.pathname : "";
+        if (nextPath && nextPath !== runtime.lastPath) {
+          runtime.lastPath = nextPath;
+          if (runtime.surfaceMode) {
+            exitSurfaceMode(false);
+            return;
+          }
+        }
+        updateVisibilityAndLayout();
+      });
+      apis.historyListenerBound = true;
+    } catch {}
   }
 
   function bindPlayerEvents() {
@@ -597,8 +660,109 @@
     return best;
   }
 
+  function spawnSparks(count, radiusNorm, speedBase, hueSpread, oxNorm, oyNorm) {
+    for (let k = 0; k < count; k++) {
+      const idx = spkCursor;
+      spkCursor = (spkCursor + 1) % SPK_COUNT;
+      const ang = (idx * 2.399963) + runtime.phase * 1.9 + k * 0.41;
+      const spd = speedBase * (0.65 + ((idx * 17) % 13) / 13);
+      spkX[idx] = oxNorm + Math.cos(ang) * radiusNorm;
+      spkY[idx] = oyNorm + Math.sin(ang) * radiusNorm;
+      spkVx[idx] = Math.cos(ang) * spd;
+      spkVy[idx] = Math.sin(ang) * spd;
+      const maxL = 0.42 + ((idx * 7) % 10) * 0.045;
+      spkLife[idx] = maxL;
+      spkMaxLife[idx] = maxL;
+      spkHue[idx] = ((k % 5) - 2) * hueSpread;
+    }
+  }
+
+  function stepAndDrawSparks(dtSec, cx, cy, minDim, swirlRate) {
+    for (let i = 0; i < SPK_COUNT; i++) {
+      let life = spkLife[i];
+      if (life <= 0) continue;
+      life -= dtSec;
+      if (life <= 0) {
+        spkLife[i] = 0;
+        continue;
+      }
+      spkLife[i] = life;
+
+      const x0 = spkX[i];
+      const y0 = spkY[i];
+      let vx = spkVx[i];
+      let vy = spkVy[i];
+
+      if (swirlRate !== 0) {
+        const sx = -y0 * swirlRate;
+        const sy = x0 * swirlRate;
+        vx += sx * dtSec;
+        vy += sy * dtSec;
+      }
+
+      const accel = 1 + dtSec * (0.85 + meter.bass * 1.6);
+      vx *= accel;
+      vy *= accel;
+      spkVx[i] = vx;
+      spkVy[i] = vy;
+
+      const x1 = x0 + vx * dtSec;
+      const y1 = y0 + vy * dtSec;
+      spkX[i] = x1;
+      spkY[i] = y1;
+
+      const alpha = Math.min(1, (life / spkMaxLife[i]) * 1.25);
+      const px0 = cx + x0 * minDim;
+      const py0 = cy + y0 * minDim;
+      const px1 = cx + x1 * minDim + (x1 - x0) * minDim * 1.6;
+      const py1 = cy + y1 * minDim + (y1 - y0) * minDim * 1.6;
+
+      ctx.strokeStyle = hslColor(spkHue[i], alpha * 0.92, 34);
+      ctx.lineWidth = 1.1 + alpha * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(px0, py0);
+      ctx.lineTo(px1, py1);
+      ctx.stroke();
+    }
+  }
+
+  function applyFeedbackPass(w, h, zoom, rot, fadeAlpha, shiftX, shiftY, trailAlpha) {
+    const fbW = fbCanvas.width;
+    const fbH = fbCanvas.height;
+
+    fbCtx.save();
+    fbCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fbCtx.globalCompositeOperation = "copy";
+    fbCtx.globalAlpha = 1;
+    fbCtx.fillStyle = "#040102";
+    fbCtx.fillRect(0, 0, fbW, fbH);
+    fbCtx.restore();
+
+    fbCtx.save();
+    fbCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fbCtx.globalCompositeOperation = "source-over";
+    fbCtx.translate(fbW * 0.5 + shiftX * fbW, fbH * 0.5 + shiftY * fbH);
+    fbCtx.rotate(rot);
+    fbCtx.scale(zoom, zoom);
+    fbCtx.globalAlpha = trailAlpha;
+    fbCtx.drawImage(canvas, -fbW * 0.5, -fbH * 0.5, fbW, fbH);
+    fbCtx.restore();
+
+    fbCtx.save();
+    fbCtx.setTransform(1, 0, 0, 1, 0, 0);
+    fbCtx.globalCompositeOperation = "source-over";
+    fbCtx.fillStyle = `rgba(4, 1, 2, ${fadeAlpha.toFixed(3)})`;
+    fbCtx.fillRect(0, 0, fbW, fbH);
+    fbCtx.restore();
+
+    ctx.save();
+    ctx.globalCompositeOperation = "copy";
+    ctx.drawImage(fbCanvas, 0, 0, w, h);
+    ctx.restore();
+  }
+
   function updateAudioFeatures(dtSec, nowMs) {
-    const sens = SENSITIVITY_MAP[config.sensitivity] || 1.08;
+    const sens = SENSITIVITY_MAP[config.sensitivity] || 1.24;
     const isPlaying = !playback.isPaused && !!playback.trackUri;
 
     if (!isPlaying) {
@@ -607,15 +771,28 @@
       meter.mid *= decay;
       meter.high *= decay;
       meter.energy *= decay;
-      meter.beatPulse *= Math.exp(-dtSec * 9.0);
+      meter.kick *= Math.exp(-dtSec * 9.5);
+      meter.snare *= Math.exp(-dtSec * 11.0);
+      meter.shock *= Math.exp(-dtSec * 8.0);
+      meter.shakeX *= decay;
+      meter.shakeY *= decay;
+      meter.beatPulse *= Math.exp(-dtSec * 9.5);
       meter.flux *= decay;
+      runtime.spinVel += (1 - runtime.spinVel) * (1 - Math.exp(-dtSec * 4.5));
       for (let i = 0; i < 48; i++) {
         meter.bins[i] *= decay;
-        meter.peaks[i] = Math.max(meter.bins[i], meter.peaks[i] - dtSec * 0.42);
+        meter.peaks[i] = Math.max(meter.bins[i], meter.peaks[i] - dtSec * 0.45);
       }
       for (let i = 0; i < 128; i++) {
         meter.wave[i] *= decay;
+        meter.waveB[i] *= decay;
       }
+      for (let i = 0; i < SPK_COUNT; i++) {
+        if (spkLife[i] > 0) {
+          spkLife[i] = Math.max(0, spkLife[i] - dtSec * 2.2);
+        }
+      }
+      runtime.driftPhase += dtSec * 0.22;
       return false;
     }
 
@@ -667,13 +844,13 @@
       if (seg) {
         pitches = seg.pitches;
         const rel = Math.max(0, sec - seg.start);
-        const env = rel < 0.06 ? rel / 0.06 : Math.exp(-(rel - 0.06) * 4.5);
-        const normLoud = Math.max(0, Math.min(1, ((seg.loudness_max ?? -12) + 36) / 36));
+        const env = rel < 0.05 ? rel / 0.05 : Math.exp(-(rel - 0.05) * 5.0);
+        const normLoud = Math.max(0, Math.min(1, ((seg.loudness_max ?? -12) + 34) / 34));
         if (!features.lows) {
-          rawBass = normLoud * env * (pitches ? (pitches[0] + pitches[1] + pitches[2]) / 2.2 : 0.85);
-          rawMid = normLoud * env * (pitches ? (pitches[4] + pitches[5] + pitches[7]) / 2.2 : 0.78);
-          rawHigh = normLoud * env * (pitches ? (pitches[9] + pitches[10] + pitches[11]) / 2.2 : 0.7);
-          rawOnset = env > 0.78 ? normLoud : 0;
+          rawBass = normLoud * env * (pitches ? (pitches[0] + pitches[1] + pitches[2]) / 2.1 : 0.88);
+          rawMid = normLoud * env * (pitches ? (pitches[4] + pitches[5] + pitches[7]) / 2.1 : 0.80);
+          rawHigh = normLoud * env * (pitches ? (pitches[9] + pitches[10] + pitches[11]) / 2.1 : 0.72);
+          rawOnset = env > 0.74 ? normLoud : 0;
         }
       }
     }
@@ -682,68 +859,90 @@
       const pMs = features.loudnessPeriodMs || 40;
       const idx = Math.max(0, Math.min(features.loudness.length - 1, Math.floor((posMs - features.loudnessStartMs) / pMs)));
       const loud = features.loudness[idx];
-      const kickEnv = Math.exp(-beatFrac * 5.2);
-      const snareEnv = Math.exp(-((beatFrac + 0.5) % 1) * 7.5);
-      rawBass = Math.min(1, loud * (0.55 + 0.65 * kickEnv));
-      rawMid = Math.min(1, loud * (0.48 + 0.55 * snareEnv));
-      rawHigh = Math.min(1, loud * (0.35 + 0.45 * Math.sin(exactBeat * Math.PI * 4) * 0.5 + 0.25));
-      rawOnset = kickEnv > 0.75 ? loud : 0;
+      const kickEnv = Math.exp(-beatFrac * 5.8);
+      const snareEnv = Math.exp(-((beatFrac + 0.5) % 1) * 7.8);
+      rawBass = Math.min(1, loud * (0.50 + 0.75 * kickEnv));
+      rawMid = Math.min(1, loud * (0.45 + 0.65 * snareEnv));
+      rawHigh = Math.min(1, loud * (0.35 + 0.55 * (Math.sin(exactBeat * Math.PI * 4) * 0.5 + 0.5)));
+      rawOnset = kickEnv > 0.72 ? loud : 0;
     }
 
     if (!features.lows && !features.segments && !features.loudness) {
       const seed = hashTrackSeed(playback.trackUri || "velvet");
       const groove = (seed % 7) * 0.14;
-      const kickEnv = Math.exp(-beatFrac * 5.5);
+      const kickEnv = Math.exp(-beatFrac * 5.6);
       const halfBeatFrac = (exactBeat * 2) - Math.floor(exactBeat * 2);
-      const snareEnv = (beatIdx % 2 === 1 ? 1 : 0.42) * Math.exp(-beatFrac * 6.5);
+      const snareEnv = (beatIdx % 2 === 1 ? 1 : 0.45) * Math.exp(-beatFrac * 6.5);
       const hatEnv = Math.exp(-halfBeatFrac * 9.0);
-      const phrase = 0.72 + 0.28 * Math.sin(posMs * 0.0005 + groove);
-      rawBass = Math.min(1, (0.24 + 0.76 * kickEnv) * phrase);
-      rawMid = Math.min(1, (0.22 + 0.68 * snareEnv) * phrase);
-      rawHigh = Math.min(1, (0.18 + 0.72 * hatEnv) * phrase);
-      rawOnset = beatIdx !== meter.lastBeatIndex ? 0.88 : 0;
+      const phrase = 0.72 + 0.28 * Math.sin(posMs * 0.00055 + groove);
+      rawBass = Math.min(1, (0.22 + 0.82 * kickEnv) * phrase);
+      rawMid = Math.min(1, (0.20 + 0.72 * snareEnv) * phrase);
+      rawHigh = Math.min(1, (0.16 + 0.76 * hatEnv) * phrase);
+      rawOnset = beatIdx !== meter.lastBeatIndex ? 0.9 : 0;
     }
 
     let beatTriggered = false;
     if (features.beats && features.beats.length > 0) {
       const bi = bSearchIndex(features.beats, posMs);
-      if (bi !== meter.lastBeatIndex && Math.abs(posMs - features.beats[bi]) < 90) {
+      if (bi !== meter.lastBeatIndex && Math.abs(posMs - features.beats[bi]) < 95) {
         meter.lastBeatIndex = bi;
         beatTriggered = true;
       }
     } else if (beatIdx !== meter.lastBeatIndex) {
       meter.lastBeatIndex = beatIdx;
-      if (rawBass > 0.22 || rawOnset > 0.28 || !features.lows) {
+      if (rawBass > 0.18 || rawOnset > 0.24 || !features.lows) {
         beatTriggered = true;
       }
     }
 
     const posDelta = Math.max(0, rawBass - meter.prevRawBass);
+    const midDelta = Math.max(0, rawMid - meter.prevRawMid);
     meter.prevRawBass = rawBass;
-    meter.flux = meter.flux * 0.6 + (posDelta * 3.5 + rawOnset * 0.6) * 0.4;
-    meter.avgFlux = meter.avgFlux * 0.96 + meter.flux * 0.04;
+    meter.prevRawMid = rawMid;
+    meter.flux = meter.flux * 0.55 + (posDelta * 4.2 + rawOnset * 0.75) * 0.45;
+    meter.avgFlux = meter.avgFlux * 0.95 + meter.flux * 0.05;
 
-    if (!beatTriggered && meter.flux > Math.max(0.24, meter.avgFlux * 2.05) && nowMs - meter.lastOnsetWallMs > Math.max(190, beatPeriodMs * 0.48)) {
+    if (!beatTriggered && meter.flux > Math.max(0.20, meter.avgFlux * 1.85) && nowMs - meter.lastOnsetWallMs > Math.max(165, beatPeriodMs * 0.42)) {
       beatTriggered = true;
     }
 
     if (beatTriggered) {
       meter.beatPulse = 1;
+      meter.kick = Math.min(1.6, 0.85 + rawBass * 0.65);
+      meter.shock = 1;
       meter.lastOnsetWallMs = nowMs;
+      runtime.spinVel = Math.min(4.2, 2.2 + rawBass * 1.9);
+      if (rawBass > 0.68 || beatIdx % 4 === 0) {
+        runtime.spinDir = -runtime.spinDir;
+      }
+      const punch = 0.008 + Math.min(0.022, (rawBass * 0.018 + meter.flux * 0.01) * sens);
+      meter.shakeX = Math.cos(nowMs * 0.037) * punch;
+      meter.shakeY = Math.sin(nowMs * 0.053) * punch;
+      spawnSparks(Math.round(7 + rawBass * 10), 0.16 + rawBass * 0.10, 0.55 + rawBass * 0.95, 36, 0, 0);
     } else {
-      meter.beatPulse *= Math.exp(-dtSec * (5.2 + bpm / 38));
+      meter.beatPulse *= Math.exp(-dtSec * (5.6 + bpm / 34));
+      meter.kick *= Math.exp(-dtSec * 8.4);
+      meter.shock *= Math.exp(-dtSec * 4.8);
+      meter.shakeX *= Math.exp(-dtSec * 16.0);
+      meter.shakeY *= Math.exp(-dtSec * 16.0);
     }
 
-    const tBass = Math.min(1.4, (rawBass * 0.85 + meter.beatPulse * 0.42) * sens);
-    const tMid = Math.min(1.4, (rawMid * 0.92 + rawBass * 0.16) * sens);
-    const tHigh = Math.min(1.4, (rawHigh * 0.95 + meter.flux * 0.35) * sens);
+    const snareTarget = Math.min(1.5, (midDelta * 4.4 + rawHigh * 0.82) * sens);
+    meter.snare += (snareTarget - meter.snare) * (1 - Math.exp(-dtSec * (snareTarget > meter.snare ? 38 : 11)));
 
-    const kAttack = 1 - Math.exp(-dtSec * 28);
-    const kRelease = 1 - Math.exp(-dtSec * 7.5);
+    const bPow = Math.pow(Math.max(0, rawBass), 1.18);
+    const tBass = Math.min(1.65, (bPow * 0.96 + meter.kick * 0.48 + meter.beatPulse * 0.34) * sens);
+    const tMid = Math.min(1.55, (Math.pow(Math.max(0, rawMid), 1.12) * 1.05 + rawBass * 0.18 + meter.snare * 0.25) * sens);
+    const tHigh = Math.min(1.55, (Math.pow(Math.max(0, rawHigh), 1.1) * 1.08 + meter.flux * 0.42) * sens);
+
+    const kAttack = 1 - Math.exp(-dtSec * 42);
+    const kRelease = 1 - Math.exp(-dtSec * 9.5);
     meter.bass += (tBass - meter.bass) * (tBass > meter.bass ? kAttack : kRelease);
     meter.mid += (tMid - meter.mid) * (tMid > meter.mid ? kAttack : kRelease);
     meter.high += (tHigh - meter.high) * (tHigh > meter.high ? kAttack : kRelease);
-    meter.energy = meter.bass * 0.48 + meter.mid * 0.34 + meter.high * 0.18;
+    meter.energy = meter.bass * 0.50 + meter.mid * 0.32 + meter.high * 0.18;
+
+    runtime.spinVel += (1 + meter.energy * 0.9 - runtime.spinVel) * (1 - Math.exp(-dtSec * 5.2));
 
     const tSec = posMs * 0.001;
     for (let i = 0; i < 48; i++) {
@@ -751,43 +950,48 @@
       let bandBase;
       if (i < 14) {
         const w = i / 14;
-        bandBase = meter.bass * (1 - w * 0.45) + meter.mid * (w * 0.35);
+        bandBase = meter.bass * (1.08 - w * 0.38) + meter.mid * (w * 0.35);
       } else if (i < 33) {
         const w = (i - 14) / 19;
-        bandBase = meter.mid * (1 - Math.abs(w - 0.5) * 0.35) + meter.bass * ((1 - w) * 0.28) + meter.high * (w * 0.35);
+        bandBase = meter.mid * (1.06 - Math.abs(w - 0.5) * 0.32) + meter.bass * ((1 - w) * 0.28) + meter.high * (w * 0.40);
       } else {
         const w = (i - 33) / 14;
-        bandBase = meter.high * (0.72 + w * 0.42) + meter.mid * ((1 - w) * 0.25);
+        bandBase = meter.high * (0.78 + w * 0.48) + meter.mid * ((1 - w) * 0.26);
       }
 
-      const pitchVal = pitches ? pitches[i % 12] : (0.52 + 0.48 * Math.sin(tSec * (4.2 + (i % 7) * 1.3) + i * 0.65));
-      const ripple = 0.58 + 0.42 * Math.sin(tSec * (7.5 + i * 0.95) - normF * 9.0 + meter.beatPulse * 2.2) * Math.cos(tSec * 3.1 + i * 1.4);
-      const binTarget = Math.max(0.02, Math.min(1.0, bandBase * (0.52 + pitchVal * 0.42) * ripple + meter.beatPulse * (i < 12 ? 0.26 : 0.09)));
+      const pitchVal = pitches ? pitches[i % 12] : (0.50 + 0.50 * Math.sin(tSec * (5.6 + (i % 7) * 1.45) + i * 0.72));
+      const ripple = 0.54 + 0.46 * Math.sin(tSec * (9.5 + i * 1.05) - normF * 11.0 + meter.beatPulse * 2.8) * Math.cos(tSec * 4.2 + i * 1.5);
+      const kickLift = i < 14 ? meter.kick * 0.36 : i > 30 ? meter.snare * 0.22 : meter.beatPulse * 0.16;
+      const binTarget = Math.max(0.03, Math.min(1.15, bandBase * (0.50 + pitchVal * 0.50) * ripple + kickLift));
 
       const bLerp = binTarget > meter.bins[i] ? kAttack : kRelease;
       meter.bins[i] += (binTarget - meter.bins[i]) * bLerp;
       if (meter.bins[i] > meter.peaks[i]) {
         meter.peaks[i] = meter.bins[i];
       } else {
-        meter.peaks[i] = Math.max(meter.bins[i], meter.peaks[i] - dtSec * 0.38);
+        meter.peaks[i] = Math.max(meter.bins[i], meter.peaks[i] - dtSec * 0.58);
       }
     }
 
     for (let i = 0; i < 128; i++) {
       const p = (i / 128) * Math.PI * 2;
-      const w1 = Math.sin(p * 2 + tSec * 7.2) * (0.35 + meter.bass * 0.85);
-      const w2 = Math.sin(p * 6 - tSec * 12.5) * (0.22 + meter.mid * 0.65);
-      const w3 = Math.sin(p * 17 + tSec * 23.0) * (0.12 + meter.high * 0.55);
-      const wBeat = Math.cos(p * 4 + tSec * 4.5) * meter.beatPulse * 0.35;
-      meter.wave[i] = Math.max(-1.2, Math.min(1.2, w1 + w2 + w3 + wBeat));
+      const b0 = meter.bins[(i * 3) % 48];
+      const b1 = meter.bins[(i * 7 + 19) % 48];
+      const wSub = Math.sin(p * 3 + tSec * 9.5) * (0.28 + meter.bass * 0.78 + meter.kick * 0.32);
+      const wMid = Math.sin(p * 8 - tSec * 16.5) * (0.18 + meter.mid * 0.58 + b0 * 0.36);
+      const wHigh = Math.sin(p * 23 + tSec * 31.0) * (0.08 + meter.high * 0.52 + b1 * 0.28);
+      const edgeBuzz = ((i & 1) === 0 ? 1 : -1) * Math.pow(Math.max(0, Math.sin(p * 11 + tSec * 24)), 3) * (meter.snare * 0.42 + meter.high * 0.24);
+      meter.wave[i] = Math.max(-1.6, Math.min(1.6, wSub + wMid + wHigh + edgeBuzz));
+      meter.waveB[i] = Math.max(-1.6, Math.min(1.6, Math.cos(p * 4 - tSec * 11.2) * (0.24 + meter.mid * 0.72) - wHigh * 0.85 + edgeBuzz * 0.7));
     }
 
-    runtime.phase += dtSec * (1.2 + meter.energy * 3.6 + (bpm / 120) * 0.8);
-    runtime.spiralPhase += dtSec * (0.45 + meter.bass * 1.65 + meter.beatPulse * 0.9);
-    runtime.tunnelPhase += dtSec * (0.55 + meter.energy * 1.9);
+    runtime.phase += dtSec * (1.8 + meter.energy * 4.4 + (bpm / 120) * 1.15);
+    runtime.spiralPhase += dtSec * (0.72 + meter.bass * 2.1 + meter.kick * 1.25) * runtime.spinDir;
+    runtime.tunnelPhase += dtSec * (0.95 + meter.energy * 2.6 + meter.kick * 1.3);
+    runtime.driftPhase += dtSec * (0.65 + meter.energy * 1.35 + (bpm / 120) * 0.4);
 
     if (config.rgbRotate) {
-      runtime.rotHue = (runtime.rotHue + dtSec * (22 + meter.energy * 42)) % 360;
+      runtime.rotHue = (runtime.rotHue + dtSec * (32 + meter.energy * 58 + meter.kick * 40)) % 360;
     } else {
       runtime.rotHue = config.hue;
     }
@@ -797,244 +1001,348 @@
 
   function hslColor(hueOffset, alpha, lightBoost) {
     const h = ((runtime.rotHue + hueOffset) % 360 + 360) % 360;
-    const s = config.rgbRotate ? Math.max(76, config.sat) : config.sat;
-    const l = Math.max(18, Math.min(92, 54 + (lightBoost || 0)));
+    const s = config.rgbRotate ? Math.max(82, config.sat) : config.sat;
+    const l = Math.max(18, Math.min(96, 54 + (lightBoost || 0)));
     return `hsla(${h.toFixed(1)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%, ${alpha.toFixed(3)})`;
   }
 
-  function renderTunnel(w, h) {
-    const cx = w * 0.5;
-    const cy = h * 0.5;
+  function renderTunnel(w, h, dtSec, isPlaying) {
     const minDim = Math.min(w, h);
-    const fbW = fbCanvas.width;
-    const fbH = fbCanvas.height;
+    const driftAmp = isPlaying ? (0.085 + meter.energy * 0.065) : 0.03;
+    const ox = Math.sin(runtime.driftPhase * 0.82) * w * driftAmp + meter.shakeX * w;
+    const oy = Math.cos(runtime.driftPhase * 1.13) * h * driftAmp + meter.shakeY * h;
+    const cx = w * 0.5 + ox;
+    const cy = h * 0.5 + oy;
 
-    fbCtx.save();
-    fbCtx.globalCompositeOperation = "copy";
-    fbCtx.globalAlpha = 1;
-    fbCtx.fillStyle = "#000000";
-    fbCtx.fillRect(0, 0, fbW, fbH);
-    fbCtx.restore();
+    const zoom = isPlaying ? (1.046 + meter.bass * 0.088 + meter.kick * 0.065) : 1.016;
+    const rot = isPlaying ? (Math.sin(runtime.tunnelPhase * 0.58) * 0.018 + meter.mid * 0.016 * runtime.spinDir) : 0.004;
+    const shiftX = isPlaying ? (Math.sin(runtime.driftPhase * 0.82) * 0.0055) : 0;
+    const shiftY = isPlaying ? (Math.cos(runtime.driftPhase * 1.13) * 0.0055) : 0;
+    const fade = isPlaying ? Math.max(0.04, 0.14 - Math.min(0.08, meter.energy * 0.055)) : 0.24;
 
-    fbCtx.save();
-    fbCtx.fillStyle = `rgba(6, 1, 3, ${(0.12 + (1 - Math.min(1, meter.energy)) * 0.14).toFixed(3)})`;
-    fbCtx.fillRect(0, 0, fbW, fbH);
-    const zoom = 1.028 + meter.bass * 0.042 + meter.beatPulse * 0.036;
-    const rot = Math.sin(runtime.tunnelPhase * 0.45) * 0.012 + meter.mid * 0.008;
-    fbCtx.translate(fbW * 0.5, fbH * 0.5);
-    fbCtx.rotate(rot);
-    fbCtx.scale(zoom, zoom);
-    fbCtx.globalAlpha = 0.88;
-    fbCtx.drawImage(canvas, -fbW * 0.5, -fbH * 0.5, fbW, fbH);
-    fbCtx.restore();
-
-    ctx.globalCompositeOperation = "copy";
-    ctx.drawImage(fbCanvas, 0, 0, w, h);
+    applyFeedbackPass(w, h, zoom, rot, fade, shiftX, shiftY, 0.91);
     ctx.globalCompositeOperation = "lighter";
 
-    const strands = 6;
-    const pts = 112;
-    const baseR = minDim * (0.20 + meter.bass * 0.085 + meter.beatPulse * 0.045);
+    if (isPlaying && meter.shock > 0.05) {
+      const shockR = minDim * (0.14 + (1 - meter.shock) * 0.48);
+      ctx.beginPath();
+      ctx.arc(cx, cy, shockR, 0, Math.PI * 2);
+      ctx.lineWidth = 1.6 + meter.shock * 3.5;
+      ctx.strokeStyle = hslColor(18, meter.shock * 0.65, 34);
+      ctx.stroke();
+    }
+
+    const outerHalo = ctx.createRadialGradient(cx, cy, minDim * 0.08, cx, cy, minDim * (0.34 + meter.bass * 0.14));
+    outerHalo.addColorStop(0, "rgba(0, 0, 0, 0)");
+    outerHalo.addColorStop(0.55, hslColor(-12, 0.14 + meter.bass * 0.18, 12));
+    outerHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = outerHalo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, minDim * 0.48, 0, Math.PI * 2);
+    ctx.fill();
+
+    const baseR = minDim * (0.17 + meter.bass * 0.085 + meter.kick * 0.045);
+    const strands = 8;
+    const pts = 128;
 
     for (let s = 0; s < strands; s++) {
+      const isHotCore = s >= 5;
       const strandShift = (s / strands) * Math.PI * 2;
-      const hueOff = (s * 42) - 40;
+      const hueOff = (s * 38) - 52;
       ctx.beginPath();
-      ctx.lineWidth = s === 0 ? 2.4 : 1.5;
-      ctx.strokeStyle = hslColor(hueOff, s === 0 ? 0.92 : 0.58, s === 0 ? 18 : 6);
+      ctx.lineWidth = isHotCore ? (0.95 + meter.high * 0.65) : (2.1 + meter.bass * 1.4);
+      ctx.strokeStyle = hslColor(hueOff, isHotCore ? 0.95 : 0.62, isHotCore ? 38 : 10);
 
       for (let i = 0; i <= pts; i++) {
         const a = (i / pts) * Math.PI * 2;
-        const wIdx = Math.floor((i / pts) * 127);
-        const wVal = meter.wave[(wIdx + s * 19) & 127];
-        const bVal = meter.bins[(i + s * 7) % 48];
-        const sharpSpike = Math.sin(a * (5 + s) + runtime.phase * (1.2 + s * 0.25)) * (6 + meter.high * 22);
-        const r = baseR + wVal * minDim * (0.045 + meter.mid * 0.055) + bVal * minDim * 0.045 + sharpSpike;
-        const px = cx + Math.cos(a + strandShift * 0.08) * r;
-        const py = cy + Math.sin(a + strandShift * 0.08) * r;
+        const wIdx = i & 127;
+        const wVal = meter.wave[(wIdx + s * 17) & 127];
+        const wAlt = meter.waveB[(wIdx + s * 29) & 127];
+        const bVal = meter.bins[(i + s * 5) % 48];
+        const sharpTooth = Math.sin(a * (7 + (s % 4) * 2) + runtime.phase * (1.8 + s * 0.35) * runtime.spinDir) * (4 + meter.mid * 18 + meter.snare * 16);
+        const r = Math.max(14, baseR + (wVal * 0.65 + wAlt * 0.35) * minDim * (0.055 + meter.bass * 0.068) + bVal * minDim * 0.058 + sharpTooth);
+        const px = cx + Math.cos(a + strandShift * 0.06) * r;
+        const py = cy + Math.sin(a + strandShift * 0.06) * r;
         if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-    }
-
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderSpiral(w, h) {
-    const cx = w * 0.5;
-    const cy = h * 0.5;
-    const maxR = Math.min(w, h) * 0.47;
-
-    ctx.fillStyle = "rgba(8, 2, 4, 0.20)";
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = "lighter";
-
-    const arms = 5;
-    const steps = 84;
-    for (let a = 0; a < arms; a++) {
-      const baseAngle = (a / arms) * Math.PI * 2 + runtime.spiralPhase;
-      ctx.beginPath();
-      ctx.lineWidth = 2.0 + meter.bass * 1.4;
-      ctx.strokeStyle = hslColor(a * 45, 0.85, 10);
-
-      for (let i = 0; i < steps; i++) {
-        const t = i / (steps - 1);
-        const bin = meter.bins[Math.floor(t * 47)];
-        const radius = t * maxR * (0.85 + meter.bass * 0.22);
-        const theta = baseAngle + t * (4.6 + meter.mid * 1.8) + Math.sin(t * 10 - runtime.phase) * (0.18 + bin * 0.35);
-        const wobble = bin * 28 * Math.sin(t * 14 + runtime.phase);
-        const x = cx + Math.cos(theta) * (radius + wobble);
-        const y = cy + Math.sin(theta) * (radius + wobble);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-
-    const coreR = 16 + meter.bass * 32 + meter.beatPulse * 24;
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2.2);
-    grad.addColorStop(0, hslColor(0, 0.85, 28));
-    grad.addColorStop(0.5, hslColor(25, 0.38, 10));
-    grad.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, coreR * 2.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderStarburst(w, h) {
-    const cx = w * 0.5;
-    const cy = h * 0.5;
-    const minDim = Math.min(w, h);
-
-    ctx.fillStyle = "rgba(8, 2, 4, 0.17)";
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = "lighter";
-
-    const layers = 7;
-    const pts = 96;
-    for (let l = 0; l < layers; l++) {
-      const k = l / (layers - 1);
-      const baseR = minDim * (0.09 + k * 0.31) * (0.86 + meter.bass * 0.28 + meter.beatPulse * 0.14);
-      const lobes = 6 + (l % 3) * 2;
-      ctx.beginPath();
-      ctx.lineWidth = 1.6 + (1 - k) * 1.4;
-      ctx.strokeStyle = hslColor(l * 34 - 30, 0.72 - k * 0.25, 12);
-
-      for (let i = 0; i <= pts; i++) {
-        const ang = (i / pts) * Math.PI * 2;
-        const bin = meter.bins[(i + l * 5) % 48];
-        const amp = Math.sin(ang * lobes + runtime.phase * (l % 2 === 0 ? 1 : -1)) * (14 + meter.mid * 36) + bin * (24 + meter.high * 38);
-        const r = Math.max(8, baseR + amp);
-        const x = cx + Math.cos(ang) * r;
-        const y = cy + Math.sin(ang) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
       }
       ctx.closePath();
       ctx.stroke();
     }
 
+    if (isPlaying && (meter.kick > 0.32 || meter.high > 0.55)) {
+      const rayCount = 16;
+      for (let rIdx = 0; rIdx < rayCount; rIdx++) {
+        const bVal = meter.bins[(rIdx * 3) % 48];
+        if (bVal < 0.36) continue;
+        const ang = (rIdx / rayCount) * Math.PI * 2 + runtime.phase * 0.45 * runtime.spinDir;
+        const rStart = baseR * 1.05;
+        const rEnd = rStart + minDim * (0.12 + bVal * 0.24 + meter.kick * 0.14);
+        ctx.strokeStyle = hslColor(rIdx * 18, 0.55 + bVal * 0.35, 30);
+        ctx.lineWidth = 1.0 + bVal * 1.4;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * rStart, cy + Math.sin(ang) * rStart);
+        ctx.lineTo(cx + Math.cos(ang) * rEnd, cy + Math.sin(ang) * rEnd);
+        ctx.stroke();
+      }
+    }
+
+    stepAndDrawSparks(dtSec, cx, cy, minDim, 0.9 * runtime.spinDir);
     ctx.globalCompositeOperation = "source-over";
   }
 
-  function renderScope(w, h) {
-    ctx.fillStyle = "rgba(9, 2, 5, 0.32)";
-    ctx.fillRect(0, 0, w, h);
+  function renderSpiral(w, h, dtSec, isPlaying) {
+    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w : 0);
+    const cy = h * 0.5 + (isPlaying ? meter.shakeY * h : 0);
+    const minDim = Math.min(w, h);
+    const maxR = minDim * 0.48;
 
-    const padX = Math.max(24, w * 0.05);
-    const usableW = w - padX * 2;
-    const barCount = 48;
-    const slotW = usableW / barCount;
-    const barW = Math.max(4, slotW * 0.7);
-    const cy = h * 0.5;
-    const maxBarH = h * 0.34;
+    const zoom = isPlaying ? (1.032 + meter.bass * 0.056 + meter.kick * 0.042) : 1.012;
+    const swirl = isPlaying ? ((0.032 + meter.energy * 0.052 + meter.kick * 0.034) * runtime.spinDir) : 0.008;
+    const fade = isPlaying ? 0.14 : 0.24;
+
+    applyFeedbackPass(w, h, zoom, swirl, fade, 0, 0, 0.90);
+    ctx.globalCompositeOperation = "lighter";
+
+    const arms = 6;
+    const steps = 88;
+    for (let a = 0; a < arms; a++) {
+      const baseAngle = (a / arms) * Math.PI * 2 + runtime.spiralPhase;
+
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        ctx.lineWidth = pass === 0 ? (3.2 + meter.bass * 2.2) : (1.05 + meter.high * 0.6);
+        ctx.strokeStyle = hslColor(a * 42 + pass * 16, pass === 0 ? 0.65 : 0.96, pass === 0 ? 10 : 38);
+
+        for (let i = 0; i < steps; i++) {
+          const t = i / (steps - 1);
+          const bin = meter.bins[Math.floor(t * 47)];
+          const wave = meter.wave[Math.floor(t * 127)];
+          const radius = t * maxR * (0.86 + meter.bass * 0.24 + meter.kick * 0.12);
+          const twist = 5.4 + meter.mid * 2.4 + meter.kick * 1.1;
+          const theta = baseAngle + t * twist * runtime.spinDir + Math.sin(t * 12 - runtime.phase * 1.4) * (0.16 + bin * 0.36);
+          const amp = (bin * 34 + wave * 18) * (0.35 + t * 0.9);
+          const x = cx + Math.cos(theta) * (radius + amp);
+          const y = cy + Math.sin(theta) * (radius + amp);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    const coreR = 14 + meter.bass * 36 + meter.kick * 28;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2.6);
+    grad.addColorStop(0, hslColor(0, 0.96, 40));
+    grad.addColorStop(0.32, hslColor(22, 0.72, 18));
+    grad.addColorStop(0.7, hslColor(-24, 0.28, 6));
+    grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR * 2.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (isPlaying && meter.beatPulse > 0.25) {
+      spawnSparks(3, 0.08, 0.55 + meter.bass * 0.85, 45, 0, 0);
+    }
+    stepAndDrawSparks(dtSec, cx, cy, minDim, 2.8 * runtime.spinDir);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderStarburst(w, h, dtSec, isPlaying) {
+    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w : 0);
+    const cy = h * 0.5 + (isPlaying ? meter.shakeY * h : 0);
+    const minDim = Math.min(w, h);
+
+    const zoom = isPlaying ? (1.030 + meter.bass * 0.052 + meter.kick * 0.048) : 1.010;
+    const twist = isPlaying ? (Math.sin(runtime.phase * 0.35) * 0.024 * runtime.spinDir) : 0.003;
+    applyFeedbackPass(w, h, zoom, twist, isPlaying ? 0.14 : 0.24, 0, 0, 0.89);
 
     ctx.globalCompositeOperation = "lighter";
 
+    const crowns = 8;
+    const pts = 96;
+    for (let l = 0; l < crowns; l++) {
+      const k = l / (crowns - 1);
+      const baseR = minDim * (0.075 + k * 0.34) * (0.85 + meter.bass * 0.28 + meter.kick * 0.18);
+      const spikes = 6 + (l % 4) * 2;
+      const dir = l % 2 === 0 ? runtime.spinDir : -runtime.spinDir;
+
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        ctx.lineWidth = pass === 0 ? (2.4 + (1 - k) * 1.8) : 0.95;
+        ctx.strokeStyle = hslColor(l * 30 - 35 + pass * 14, pass === 0 ? (0.72 - k * 0.22) : 0.92, pass === 0 ? 10 : 38);
+
+        for (let i = 0; i <= pts; i++) {
+          const ang = (i / pts) * Math.PI * 2;
+          const bin = meter.bins[(i + l * 5) % 48];
+          const wVal = meter.wave[(i * 2 + l * 13) & 127];
+          const petal = Math.pow(Math.abs(Math.sin(ang * (spikes * 0.5) + runtime.phase * (0.9 + l * 0.15) * dir)), 1.6);
+          const jagged = petal * (18 + meter.mid * 46 + meter.kick * 28) + bin * (22 + meter.high * 44) + wVal * (8 + meter.snare * 18);
+          const r = Math.max(8, baseR + jagged);
+          const x = cx + Math.cos(ang) * r;
+          const y = cy + Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+
+    if (isPlaying) {
+      const needleCount = 24;
+      for (let n = 0; n < needleCount; n++) {
+        const ang = (n / needleCount) * Math.PI * 2 + runtime.phase * 0.65 * runtime.spinDir;
+        const bin = meter.bins[(n * 2) % 48];
+        const rIn = minDim * (0.06 + meter.kick * 0.04);
+        const rOut = minDim * (0.22 + bin * 0.28 + meter.beatPulse * 0.08);
+        ctx.strokeStyle = hslColor(n * 15, 0.55 + bin * 0.4, 34);
+        ctx.lineWidth = 1.2 + bin * 1.4;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * rIn, cy + Math.sin(ang) * rIn);
+        ctx.lineTo(cx + Math.cos(ang) * rOut, cy + Math.sin(ang) * rOut);
+        ctx.stroke();
+      }
+    }
+
+    stepAndDrawSparks(dtSec, cx, cy, minDim, 1.4 * runtime.spinDir);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderScope(w, h, dtSec, isPlaying) {
+    const zoom = isPlaying ? (1.022 + meter.bass * 0.028 + meter.kick * 0.018) : 1.005;
+    applyFeedbackPass(w, h, zoom, 0, isPlaying ? 0.24 : 0.30, 0, 0, 0.84);
+
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const minDim = Math.min(w, h);
+    const padX = Math.max(20, w * 0.04);
+    const usableW = w - padX * 2;
+    const barCount = 48;
+    const slotW = usableW / barCount;
+    const barW = Math.max(4, slotW * 0.72);
+    const maxBarH = h * 0.36;
+
+    ctx.globalCompositeOperation = "lighter";
+
+    if (isPlaying && meter.kick > 0.2) {
+      ctx.strokeStyle = hslColor(12, meter.kick * 0.55, 36);
+      ctx.lineWidth = 1.5 + meter.kick * 3.0;
+      ctx.beginPath();
+      ctx.moveTo(padX, cy);
+      ctx.lineTo(padX + usableW, cy);
+      ctx.stroke();
+    }
+
+    const segStep = 6;
     for (let i = 0; i < barCount; i++) {
       const val = meter.bins[i];
       const peakVal = meter.peaks[i];
       const x = padX + i * slotW + (slotW - barW) * 0.5;
-      const barH = Math.max(3, val * maxBarH);
+      const barH = Math.max(4, val * maxBarH);
       const peakYOff = peakVal * maxBarH;
 
       const grad = ctx.createLinearGradient(x, cy - barH, x, cy + barH);
-      grad.addColorStop(0, hslColor(i * 3.5 + 20, 0.92, 22));
-      grad.addColorStop(0.5, hslColor(i * 2.0, 0.75, 4));
-      grad.addColorStop(1, hslColor(i * 3.5 + 20, 0.92, 22));
+      grad.addColorStop(0, hslColor(i * 4.2 + 24, 0.95, 30));
+      grad.addColorStop(0.5, hslColor(i * 2.5, 0.80, 6));
+      grad.addColorStop(1, hslColor(i * 4.2 + 24, 0.95, 30));
 
       ctx.fillStyle = grad;
-      ctx.fillRect(x, cy - barH, barW, barH * 2);
+      const numSegs = Math.max(1, Math.floor(barH / segStep));
+      for (let s = 0; s < numSegs; s++) {
+        const yOff = s * segStep;
+        ctx.fillRect(x, cy - yOff - 4, barW, 4);
+        ctx.fillRect(x, cy + yOff + 1, barW, 4);
+      }
 
-      ctx.fillStyle = hslColor(i * 3.5 + 35, 0.96, 32);
-      ctx.fillRect(x, cy - peakYOff - 3, barW, 2.5);
-      ctx.fillRect(x, cy + peakYOff + 0.5, barW, 2.5);
+      ctx.fillStyle = hslColor(i * 4 + 35, 1.0, 42);
+      ctx.fillRect(x, cy - peakYOff - 4, barW, 3);
+      ctx.fillRect(x, cy + peakYOff + 1, barW, 3);
+    }
+
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.beginPath();
+      ctx.lineWidth = pass === 0 ? 3.8 : 1.3;
+      ctx.strokeStyle = hslColor(pass === 0 ? 8 : 22, pass === 0 ? 0.62 : 0.98, pass === 0 ? 16 : 42);
+      for (let i = 0; i < 128; i++) {
+        const x = padX + (i / 127) * usableW;
+        const amp = h * (0.095 + meter.energy * 0.14 + meter.kick * 0.045);
+        const y = cy + meter.wave[i] * amp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
     }
 
     ctx.beginPath();
-    ctx.lineWidth = 2.6;
-    ctx.strokeStyle = hslColor(10, 0.95, 28);
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = hslColor(62, 0.82, 28);
     for (let i = 0; i < 128; i++) {
       const x = padX + (i / 127) * usableW;
-      const y = cy + meter.wave[i] * h * (0.09 + meter.energy * 0.11);
+      const y = cy + meter.waveB[i] * h * (0.075 + meter.high * 0.10 + meter.snare * 0.04);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
 
-    ctx.beginPath();
-    ctx.lineWidth = 1.3;
-    ctx.strokeStyle = hslColor(55, 0.72, 22);
-    for (let i = 0; i < 128; i++) {
-      const x = padX + (i / 127) * usableW;
-      const y = cy - meter.wave[(i + 32) & 127] * h * (0.06 + meter.high * 0.08);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
+    stepAndDrawSparks(dtSec, cx, cy, minDim, 0);
     ctx.globalCompositeOperation = "source-over";
   }
 
-  function renderCyber(w, h) {
-    const cx = w * 0.5;
-    const horizonY = h * 0.46;
-    const orbY = horizonY - Math.min(w, h) * 0.04;
+  function renderCyber(w, h, dtSec, isPlaying) {
+    const minDim = Math.min(w, h);
+    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w * 0.6 : 0);
+    const horizonY = h * 0.48;
+    const orbY = horizonY - minDim * 0.05;
 
-    ctx.fillStyle = "rgba(8, 1, 4, 0.28)";
+    ctx.fillStyle = "rgba(6, 1, 3, 0.34)";
     ctx.fillRect(0, 0, w, h);
 
     ctx.save();
-    ctx.strokeStyle = hslColor(-8, 0.52, 6);
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = hslColor(-8, 0.62 + meter.energy * 0.25, 10);
+    ctx.lineWidth = 1.3;
 
-    const gridCols = 18;
+    const gridCols = 22;
     for (let i = -gridCols; i <= gridCols; i++) {
-      const xTop = cx + i * (w * 0.018);
-      const xBot = cx + i * (w * 0.085);
+      const xTop = cx + i * (w * 0.015);
+      const xBot = cx + i * (w * 0.082);
       ctx.beginPath();
       ctx.moveTo(xTop, horizonY);
       ctx.lineTo(xBot, h);
       ctx.stroke();
     }
 
-    const zLines = 12;
-    const zScroll = (runtime.tunnelPhase * 0.65) % 1;
+    const zLines = 14;
+    const zScroll = (runtime.tunnelPhase * 0.92) % 1;
     for (let i = 0; i < zLines; i++) {
-      const frac = Math.pow((i + zScroll) / zLines, 2.2);
+      const frac = Math.pow((i + zScroll) / zLines, 2.3);
       const y = horizonY + frac * (h - horizonY);
+      ctx.strokeStyle = hslColor(i * 3, 0.45 + frac * 0.45, 10 + meter.beatPulse * 14);
+      ctx.lineWidth = 1 + frac * 1.4;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(w, y);
       ctx.stroke();
     }
 
-    ctx.strokeStyle = hslColor(0, 0.9, 24);
-    ctx.lineWidth = 2;
+    ctx.globalCompositeOperation = "lighter";
+
+    ctx.beginPath();
+    ctx.moveTo(0, horizonY);
+    for (let i = 0; i < 48; i++) {
+      const px = (i / 47) * w;
+      const distCenter = Math.abs((i / 47) - 0.5) * 2;
+      const peakH = meter.bins[i] * h * (0.14 + distCenter * 0.16) * (0.75 + meter.bass * 0.45);
+      ctx.lineTo(px, horizonY - peakH);
+    }
+    ctx.lineTo(w, horizonY);
+    ctx.strokeStyle = hslColor(-22, 0.9, 26);
+    ctx.lineWidth = 2.0;
+    ctx.stroke();
+
+    ctx.strokeStyle = hslColor(6, 0.96, 32);
+    ctx.lineWidth = 2.2 + meter.kick * 1.8;
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
     ctx.lineTo(w, horizonY);
@@ -1042,39 +1350,57 @@
     ctx.restore();
 
     ctx.globalCompositeOperation = "lighter";
-    const orbR = Math.min(w, h) * (0.14 + meter.bass * 0.045 + meter.beatPulse * 0.025);
+    const orbR = minDim * (0.135 + meter.bass * 0.055 + meter.kick * 0.032);
     const spokes = 48;
 
     for (let i = 0; i < spokes; i++) {
-      const ang = (i / spokes) * Math.PI * 2 + runtime.phase * 0.18;
-      const len = orbR + meter.bins[i] * Math.min(w, h) * 0.16;
-      const x1 = cx + Math.cos(ang) * (orbR * 0.85);
-      const y1 = orbY + Math.sin(ang) * (orbR * 0.85);
+      const ang = (i / spokes) * Math.PI * 2 + runtime.phase * 0.35 * runtime.spinDir;
+      const bin = meter.bins[i];
+      const len = orbR + bin * minDim * (0.18 + meter.energy * 0.09);
+      const x1 = cx + Math.cos(ang) * (orbR * 0.82);
+      const y1 = orbY + Math.sin(ang) * (orbR * 0.82);
       const x2 = cx + Math.cos(ang) * len;
       const y2 = orbY + Math.sin(ang) * len;
 
-      ctx.strokeStyle = hslColor(i * 4, 0.88, 18);
-      ctx.lineWidth = 2.6;
+      ctx.strokeStyle = hslColor(i * 4.5, 0.92, 24);
+      ctx.lineWidth = 2.2 + bin * 1.6;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
     }
 
+    ctx.beginPath();
+    const orbitPts = 96;
+    const ringR = orbR * (1.28 + meter.mid * 0.16);
+    for (let i = 0; i <= orbitPts; i++) {
+      const ang = (i / orbitPts) * Math.PI * 2;
+      const wOff = meter.wave[i & 127] * minDim * (0.025 + meter.bass * 0.035);
+      const rx = cx + Math.cos(ang) * (ringR + wOff);
+      const ry = orbY + Math.sin(ang) * (ringR + wOff);
+      if (i === 0) ctx.moveTo(rx, ry);
+      else ctx.lineTo(rx, ry);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = hslColor(30, 0.92, 34);
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
     const sunGrad = ctx.createLinearGradient(cx, orbY - orbR, cx, orbY + orbR);
-    sunGrad.addColorStop(0, hslColor(25, 0.92, 26));
-    sunGrad.addColorStop(0.55, hslColor(0, 0.72, 10));
-    sunGrad.addColorStop(1, hslColor(-20, 0.88, -6));
+    sunGrad.addColorStop(0, hslColor(28, 0.96, 36));
+    sunGrad.addColorStop(0.55, hslColor(0, 0.82, 16));
+    sunGrad.addColorStop(1, hslColor(-22, 0.92, -4));
     ctx.beginPath();
     ctx.arc(cx, orbY, orbR * 0.78, 0, Math.PI * 2);
-    ctx.strokeStyle = hslColor(10, 0.95, 25);
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = hslColor(10, 0.98, 32);
+    ctx.lineWidth = 2.6;
     ctx.stroke();
     ctx.fillStyle = sunGrad;
-    ctx.globalAlpha = 0.26 + meter.bass * 0.22;
+    ctx.globalAlpha = 0.34 + meter.bass * 0.28;
     ctx.fill();
     ctx.globalAlpha = 1;
 
+    stepAndDrawSparks(dtSec, cx, orbY, minDim, 0.7 * runtime.spinDir);
     ctx.globalCompositeOperation = "source-over";
   }
 
@@ -1086,8 +1412,15 @@
     );
   }
 
+  function getCurrentPathname() {
+    if (apis.history && apis.history.location && apis.history.location.pathname) {
+      return apis.history.location.pathname;
+    }
+    return location.pathname;
+  }
+
   function isOnLyricsRoute() {
-    if (location.pathname.includes("/lyrics")) return true;
+    if (getCurrentPathname().includes("/lyrics")) return true;
     const lyricsRoot = document.querySelector(".wYWhVPZoG93lR7ogMIug, [data-testid='lyrics-line']");
     if (!lyricsRoot) return false;
     const mainView = getMainViewContainer();
@@ -1126,6 +1459,9 @@
     if (canvas.width !== cw || canvas.height !== ch) {
       canvas.width = cw;
       canvas.height = ch;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#040102";
+      ctx.fillRect(0, 0, cw, ch);
     }
 
     if (mountInMainView) {
@@ -1150,6 +1486,8 @@
     if (fbCanvas.width !== fbw || fbCanvas.height !== fbh) {
       fbCanvas.width = fbw;
       fbCanvas.height = fbh;
+      fbCtx.fillStyle = "#040102";
+      fbCtx.fillRect(0, 0, fbw, fbh);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
@@ -1179,11 +1517,11 @@
       beatLedEl.style.boxShadow = isPlaying && meter.beatPulse > 0.25 ? `0 0 ${Math.round(8 + meter.beatPulse * 10)}px ${hslColor(0, 0.9, 18)}` : "none";
     }
 
-    if (config.model === "tunnel") renderTunnel(w, h);
-    else if (config.model === "spiral") renderSpiral(w, h);
-    else if (config.model === "starburst") renderStarburst(w, h);
-    else if (config.model === "scope") renderScope(w, h);
-    else renderCyber(w, h);
+    if (config.model === "tunnel") renderTunnel(w, h, dtSec, isPlaying);
+    else if (config.model === "spiral") renderSpiral(w, h, dtSec, isPlaying);
+    else if (config.model === "starburst") renderStarburst(w, h, dtSec, isPlaying);
+    else if (config.model === "scope") renderScope(w, h, dtSec, isPlaying);
+    else renderCyber(w, h, dtSec, isPlaying);
 
     runtime.rafId = requestAnimationFrame(renderLoop);
   }
@@ -1310,12 +1648,16 @@
   }
 
   function updateVisibilityAndLayout() {
+    const routerPath = getCurrentPathname();
     const lyricsRoute = isOnLyricsRoute();
-    const pathChanged = location.pathname !== runtime.lastPath;
-    if (runtime.surfaceMode && ((lyricsRoute && !runtime.wasLyricsRoute) || (pathChanged && location.pathname.includes("/lyrics")))) {
-      runtime.surfaceMode = false;
+    const pathChanged = routerPath !== runtime.lastPath;
+    if (runtime.surfaceMode && (pathChanged || (lyricsRoute && !runtime.wasLyricsRoute))) {
+      runtime.lastPath = routerPath;
+      runtime.wasLyricsRoute = lyricsRoute;
+      exitSurfaceMode(false);
+      return;
     }
-    runtime.lastPath = location.pathname;
+    runtime.lastPath = routerPath;
     runtime.wasLyricsRoute = lyricsRoute;
     runtime.onLyricsRoute = lyricsRoute;
 
@@ -1403,11 +1745,12 @@
       "</svg>";
 
     btn.addEventListener("click", () => {
-      runtime.surfaceMode = !runtime.surfaceMode;
-      if (!runtime.surfaceMode && runtime.isFullscreen) {
-        toggleFullscreen();
+      if (runtime.surfaceMode) {
+        exitSurfaceMode(false);
+      } else {
+        runtime.surfaceMode = true;
+        updateVisibilityAndLayout();
       }
-      updateVisibilityAndLayout();
     });
 
     const lyricsWrap = document.querySelector(".NmfW_y2jYByYTRtCmPaB");
@@ -1597,9 +1940,7 @@
     exitBtn.className = "wmp-action-btn";
     exitBtn.textContent = "Exit Surface";
     exitBtn.addEventListener("click", () => {
-      runtime.surfaceMode = false;
-      if (runtime.isFullscreen) toggleFullscreen();
-      updateVisibilityAndLayout();
+      exitSurfaceMode(false);
     });
 
     rightCluster.appendChild(lyricsToggle);
@@ -1643,15 +1984,70 @@
       ensureRenderLoopState();
     });
 
+    document.addEventListener("click", (e) => {
+      if (!runtime.surfaceMode) return;
+      const target = e.target && e.target.closest ? e.target : null;
+      if (!target || target.closest("#wmp-visualizer-surface-hud, #wmp-visualizer-surface-btn")) return;
+
+      if (target.closest('button[data-testid="top-bar-back-button"]')) {
+        e.preventDefault();
+        e.stopPropagation();
+        exitSurfaceMode(false);
+        return;
+      }
+
+      if (target.closest('button[data-testid="lyrics-button"]')) {
+        if (isOnLyricsRoute()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        exitSurfaceMode(false);
+        return;
+      }
+
+      if (
+        target.closest(
+          'button[data-testid="top-bar-forward-button"],' +
+          'button[data-testid="home-button"],' +
+          'button[data-testid="browse-button"],' +
+          'button[data-testid="whats-new-feed-button"],' +
+          '[data-testid="user-widget-link"],' +
+          '#global-nav-bar form[role="search"],' +
+          '#global-nav-bar a,' +
+          '#Desktop_LeftSidebar_Id a,' +
+          '#Desktop_LeftSidebar_Id [data-testid="rootlist-item"],' +
+          '#Desktop_LeftSidebar_Id [role="listitem"],' +
+          '#Desktop_LeftSidebar_Id [aria-labelledby*="listrow"],' +
+          '#Desktop_LeftSidebar_Id [draggable="true"],' +
+          'a[href],' +
+          '[data-testid="context-item-link"],' +
+          '[data-testid="context-item-info-artist"]'
+        )
+      ) {
+        exitSurfaceMode(false);
+      }
+    }, true);
+
+    document.addEventListener("focusin", (e) => {
+      if (!runtime.surfaceMode) return;
+      const target = e.target && e.target.closest ? e.target : null;
+      if (target && target.closest('#global-nav-bar input[data-testid="search-input"]')) {
+        exitSurfaceMode(false);
+      }
+    }, true);
+
     document.addEventListener("keydown", (e) => {
       const tag = (e.target && e.target.tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
 
       if (e.altKey && (e.key === "v" || e.key === "V")) {
         e.preventDefault();
-        runtime.surfaceMode = !runtime.surfaceMode;
-        if (!runtime.surfaceMode && runtime.isFullscreen) toggleFullscreen();
-        updateVisibilityAndLayout();
+        if (runtime.surfaceMode) {
+          exitSurfaceMode(false);
+        } else {
+          runtime.surfaceMode = true;
+          updateVisibilityAndLayout();
+        }
       } else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey && !e.metaKey && runtime.visualActive) {
         e.preventDefault();
         toggleFullscreen();
@@ -1659,8 +2055,7 @@
         if (runtime.isFullscreen) {
           toggleFullscreen();
         } else if (runtime.surfaceMode) {
-          runtime.surfaceMode = false;
-          updateVisibilityAndLayout();
+          exitSurfaceMode(false);
         }
       }
     });
