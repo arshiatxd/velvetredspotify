@@ -1,1321 +1,1718 @@
-(function () {
-  if (window.__wmpTunnelVisualizerLoaded) return;
-  window.__wmpTunnelVisualizerLoaded = true;
+(() => {
+  if (window.__wmpVelvetVisualizerInit) return;
+  window.__wmpVelvetVisualizerInit = true;
 
-  var INTERNAL_W = 600;
-  var INTERNAL_H = 375;
-  var VERTEX_COUNT = 120;
-  var STRAND_COUNT = 6;
-  var FRAME_INTERVAL_PLAYING = 33;
-  var FRAME_INTERVAL_PAUSED = 120;
+  const MODELS = [
+    { id: "tunnel", label: "XP Tunnel" },
+    { id: "spiral", label: "Spiral Vortex" },
+    { id: "starburst", label: "WMC Starburst" },
+    { id: "scope", label: "Scope & Bars" },
+    { id: "cyber", label: "Cyber Orb" }
+  ];
 
-  var WMP_PALETTES = [192, 118, 285, 348, 220, 38, 160, 315];
-  var paletteIdx = 0;
-
-  var settings = {
-    model: "tunnel",
-    customHue: 192,
-    customSat: 94,
-    rgbRotation: true,
-    lyricsVizOn: true
+  const SENSITIVITY_MAP = {
+    subtle: 0.72,
+    balanced: 1.08,
+    overdrive: 1.52
   };
 
-  try {
-    var saved = localStorage.getItem("wmp_viz_settings_v2");
-    if (saved) {
-      var parsed = JSON.parse(saved);
-      if (parsed.model) settings.model = parsed.model;
-      if (typeof parsed.customHue === "number") settings.customHue = parsed.customHue;
-      if (typeof parsed.customSat === "number") settings.customSat = parsed.customSat;
-      if (typeof parsed.rgbRotation === "boolean") settings.rgbRotation = parsed.rgbRotation;
-      if (typeof parsed.lyricsVizOn === "boolean") settings.lyricsVizOn = parsed.lyricsVizOn;
-    }
-  } catch (e) {}
+  const STORE_KEYS = {
+    model: "wmp_viz_model_v2",
+    hue: "wmp_viz_hue_v2",
+    sat: "wmp_viz_sat_v2",
+    rgbRotate: "wmp_viz_rgb_rotate_v2",
+    lyricsEnabled: "wmp_viz_lyrics_on_v2",
+    sensitivity: "wmp_viz_sensitivity_v2"
+  };
 
-  function saveSettings() {
+  function readStore(key, fallback) {
     try {
-      localStorage.setItem("wmp_viz_settings_v2", JSON.stringify(settings));
-    } catch (e) {}
+      const v = localStorage.getItem(key);
+      return v !== null ? v : fallback;
+    } catch {
+      return fallback;
+    }
   }
 
-  var currentHue = settings.customHue;
-  var targetHue = settings.customHue;
-
-  var canvas = null;
-  var ctx = null;
-  var backCanvas = null;
-  var backCtx = null;
-  var hudEl = null;
-  var lyricsToggleBtn = null;
-  var surfaceBtn = null;
-  var wheelCanvas = null;
-  var wheelCtx = null;
-  var wheelImageCache = null;
-
-  var surfaceMode = false;
-  var fullscreenMode = false;
-  var wasLyricsOpen = false;
-  var isRunning = false;
-  var rafId = 0;
-  var lastFrameTime = 0;
-
-  var cachedViewportEl = null;
-  var rectLeft = 300;
-  var rectTop = 64;
-  var rectWidth = 900;
-  var rectHeight = 600;
-  var rectDirty = true;
-
-  var cosTable = new Float32Array(VERTEX_COUNT + 1);
-  var sinTable = new Float32Array(VERTEX_COUNT + 1);
-  var vxBuf = new Float32Array(VERTEX_COUNT + 1);
-  var vyBuf = new Float32Array(VERTEX_COUNT + 1);
-  var waveHarmonics = new Float32Array(24);
-  var targetHarmonics = new Float32Array(24);
-  var barPeaks = new Float32Array(48);
-  var barValues = new Float32Array(48);
-
-  for (var i = 0; i <= VERTEX_COUNT; i++) {
-    var a = (i / VERTEX_COUNT) * Math.PI * 2;
-    cosTable[i] = Math.cos(a);
-    sinTable[i] = Math.sin(a);
+  function writeStore(key, value) {
+    try {
+      localStorage.setItem(key, String(value));
+    } catch {}
   }
 
-  var spPlayerAPI = null;
-  var spRequestBuilder = null;
-  var currentTrackId = "";
-  var currentTrackTitle = "";
-  var currentTrackArtist = "";
-  var isMusicPlaying = false;
-  var trackAnalysis = null;
-  var analysisPendingId = "";
-  var lastBarIdx = -1;
-  var lastBeatIdx = -1;
-  var lastLyricText = "";
+  const config = {
+    model: readStore(STORE_KEYS.model, "tunnel"),
+    hue: Math.max(0, Math.min(360, Number(readStore(STORE_KEYS.hue, "348")) || 348)),
+    sat: Math.max(0, Math.min(100, Number(readStore(STORE_KEYS.sat, "88")) || 88)),
+    rgbRotate: readStore(STORE_KEYS.rgbRotate, "1") === "1",
+    lyricsEnabled: readStore(STORE_KEYS.lyricsEnabled, "1") === "1",
+    sensitivity: SENSITIVITY_MAP[readStore(STORE_KEYS.sensitivity, "balanced")] ? readStore(STORE_KEYS.sensitivity, "balanced") : "balanced"
+  };
 
-  var smoothBass = 0;
-  var smoothMid = 0;
-  var smoothHigh = 0;
-  var beatPulse = 0;
-  var barShock = 0;
-  var tunnelPhase = 0;
-  var spiralAngle = 0;
-  var spiralDir = 1;
-  var throatOffsetX = 0;
-  var throatOffsetY = 0;
-  var gridOffset = 0;
-  var edgeAngle = 0;
-  var localPlayPosSec = 0;
-  var lastAnchorRaw = "";
-  var lastTelemetryMs = 0;
-  var trackDurationSec = 240;
+  if (!MODELS.some((m) => m.id === config.model)) {
+    config.model = "tunnel";
+  }
 
-  function connectSpotifyInternalAPIs() {
-    if (spPlayerAPI && spRequestBuilder) return true;
-    var root = document.getElementById("main");
-    if (!root) return false;
-    var keys = Object.keys(root);
-    var fiberKey = null;
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i].indexOf("__reactContainer") === 0 || keys[i].indexOf("__reactFiber") === 0) {
-        fiberKey = keys[i];
+  const runtime = {
+    surfaceMode: false,
+    onLyricsRoute: false,
+    isFullscreen: false,
+    visualActive: false,
+    rafId: 0,
+    lastFrameMs: 0,
+    rotHue: config.hue,
+    phase: 0,
+    spiralPhase: 0,
+    tunnelPhase: 0,
+    lastPath: location.pathname,
+    wasLyricsRoute: false
+  };
+
+  const playback = {
+    trackUri: "",
+    title: "",
+    artist: "",
+    durationMs: 0,
+    isPaused: true,
+    speed: 1,
+    anchorPosMs: 0,
+    anchorWallMs: 0,
+    interpPosMs: 0,
+    lastDomText: "",
+    lastDomChangeWallMs: 0
+  };
+
+  const audioCache = new Map();
+  const pendingFetches = new Set();
+
+  const features = {
+    sourceMode: "idle",
+    bpm: 120,
+    lows: null,
+    mids: null,
+    highs: null,
+    windowMs: 40,
+    loudness: null,
+    loudnessStartMs: 0,
+    loudnessPeriodMs: 40,
+    beats: null,
+    tatums: null,
+    segments: null,
+    onsets: null
+  };
+
+  const meter = {
+    bass: 0,
+    mid: 0,
+    high: 0,
+    energy: 0,
+    beatPulse: 0,
+    prevRawBass: 0,
+    flux: 0,
+    avgFlux: 0.05,
+    lastBeatIndex: -1,
+    lastOnsetWallMs: 0,
+    bins: new Float32Array(48),
+    peaks: new Float32Array(48),
+    wave: new Float32Array(128)
+  };
+
+  const apis = {
+    player: null,
+    platform: null,
+    requestBuilder: null,
+    metadataExtensions: null,
+    playerListenerBound: false,
+    lastScanMs: 0
+  };
+
+  let canvas = null;
+  let ctx = null;
+  let fbCanvas = null;
+  let fbCtx = null;
+  let hudRoot = null;
+  let wheelCanvas = null;
+  let wheelMarker = null;
+  let beatLedEl = null;
+  let bpmLabelEl = null;
+  let titleEl = null;
+  let artistEl = null;
+
+  function normalizeSeries(arr) {
+    if (!arr || !arr.length) return null;
+    const len = arr.length;
+    const out = new Float32Array(len);
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < len; i++) {
+      const v = Number(arr[i]) || 0;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const span = max - min;
+    if (span <= 1e-6) {
+      out.fill(max > 0 ? 0.35 : 0);
+      return out;
+    }
+    for (let i = 0; i < len; i++) {
+      const n = ((Number(arr[i]) || 0) - min) / span;
+      out[i] = Math.max(0, Math.min(1, n));
+    }
+    return out;
+  }
+
+  function detectOnsetEnvelope(lows, mids, windowMs) {
+    if (!lows || lows.length < 4) return null;
+    const len = lows.length;
+    const onsets = new Float32Array(len);
+    const look = Math.max(2, Math.round(180 / Math.max(10, windowMs)));
+    for (let i = 1; i < len; i++) {
+      const combined = lows[i] * 0.72 + (mids ? mids[i] * 0.28 : 0);
+      const prev = lows[i - 1] * 0.72 + (mids ? mids[i - 1] * 0.28 : 0);
+      let avg = 0;
+      const start = Math.max(0, i - look);
+      for (let j = start; j < i; j++) {
+        avg += lows[j] * 0.72 + (mids ? mids[j] * 0.28 : 0);
+      }
+      avg /= Math.max(1, i - start);
+      const diff = Math.max(0, combined - prev);
+      const excess = Math.max(0, combined - avg * 1.12);
+      onsets[i] = Math.min(1, diff * 2.4 + excess * 1.8);
+    }
+    return onsets;
+  }
+
+  function extractTrackId(uri) {
+    if (!uri) return "";
+    const m = /^spotify:track:([A-Za-z0-9]+)$/.exec(uri);
+    if (m) return m[1];
+    const parts = uri.split(":");
+    return parts.length >= 3 && parts[1] === "track" ? parts[2] : "";
+  }
+
+  function hashTrackSeed(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function scanReactApis(force) {
+    const now = performance.now();
+    if (!force && now - apis.lastScanMs < 450) return;
+    apis.lastScanMs = now;
+
+    const root = document.getElementById("main") || document.body;
+    if (!root) return;
+
+    const keys = Object.keys(root);
+    let fiber = null;
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i].startsWith("__reactContainer$") || keys[i].startsWith("__reactFiber$")) {
+        fiber = root[keys[i]];
         break;
       }
     }
-    if (!fiberKey) return false;
+    if (!fiber) return;
 
-    var queue = [root[fiberKey]];
-    var visited = new Set();
-    var map = null;
-    while (queue.length > 0) {
-      var node = queue.shift();
-      if (!node || visited.has(node)) continue;
-      visited.add(node);
-      var props = node.memoizedProps || node.pendingProps;
-      if (props && props.value && props.value._map) {
-        map = props.value._map;
-        break;
+    const queue = [fiber];
+    const seen = new Set();
+    let steps = 0;
+
+    while (queue.length > 0 && steps < 5500) {
+      const node = queue.shift();
+      if (!node || seen.has(node)) continue;
+      seen.add(node);
+      steps++;
+
+      const props = node.memoizedProps;
+      if (props && typeof props === "object") {
+        if (!apis.player && props.playerAPI && typeof props.playerAPI.getState === "function") {
+          apis.player = props.playerAPI;
+        }
+        if (!apis.platform && props.value && typeof props.value.getRegistry === "function" && typeof props.value.getRequestBuilder === "function") {
+          apis.platform = props.value;
+        }
+        if (!apis.requestBuilder && props.instance && typeof props.instance.build === "function" && typeof props.instance.withHost === "function") {
+          apis.requestBuilder = props.instance;
+        }
       }
+
+      if (apis.platform && !apis.requestBuilder) {
+        try {
+          apis.requestBuilder = apis.platform.getRequestBuilder();
+        } catch {}
+      }
+
+      if (apis.platform && !apis.metadataExtensions) {
+        try {
+          const reg = apis.platform.getRegistry();
+          if (reg && typeof reg.resolve === "function") {
+            apis.metadataExtensions = reg.resolve(Symbol.for("MetadataExtensions"));
+          }
+        } catch {}
+      }
+
+      if (apis.player && apis.requestBuilder && apis.metadataExtensions) break;
+
       if (node.child) queue.push(node.child);
       if (node.sibling) queue.push(node.sibling);
     }
-    if (!map) return false;
 
-    map.forEach(function (val, key) {
-      var s = key.toString();
-      if (s === "Symbol(PlayerAPI)" && val && val.instance) spPlayerAPI = val.instance;
-      if (s === "Symbol(RequestBuilder)" && val && val.instance) spRequestBuilder = val.instance;
-    });
-    return !!spPlayerAPI;
+    bindPlayerEvents();
   }
 
-  function fetchAudioAnalysis(trackId) {
-    if (!trackId || trackId === analysisPendingId || !spRequestBuilder) return;
-    analysisPendingId = trackId;
-    trackAnalysis = null;
+  function bindPlayerEvents() {
+    if (apis.playerListenerBound || !apis.player) return;
+    try {
+      const events = typeof apis.player.getEvents === "function" ? apis.player.getEvents() : apis.player._events;
+      if (events && typeof events.addListener === "function") {
+        events.addListener("update", (ev) => {
+          applyPlayerState(ev && ev.data ? ev.data : ev);
+        });
+        apis.playerListenerBound = true;
+      }
+    } catch {}
+  }
+
+  function parseDomClockSeconds(text) {
+    if (!text) return -1;
+    const cleaned = text.trim();
+    const parts = cleaned.split(":");
+    if (parts.length === 2) {
+      const m = parseInt(parts[0], 10);
+      const s = parseInt(parts[1], 10);
+      if (!Number.isNaN(m) && !Number.isNaN(s)) return m * 60 + s;
+    } else if (parts.length === 3) {
+      const h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const s = parseInt(parts[2], 10);
+      if (!Number.isNaN(h) && !Number.isNaN(m) && !Number.isNaN(s)) return h * 3600 + m * 60 + s;
+    }
+    return -1;
+  }
+
+  function readDomPlaybackHints() {
+    const posEl = document.querySelector('[data-testid="playback-position"]');
+    const durEl = document.querySelector('[data-testid="playback-duration"]');
+    const titleNode = document.querySelector('[data-testid="context-item-info-title"] a, [data-testid="context-item-link"]');
+    const artistNodes = document.querySelectorAll('[data-testid="context-item-info-artist"], [data-testid="context-item-info-subtitles"] a');
+    const playBtn = document.querySelector('button[data-testid="control-button-playpause"]');
+
+    const domPosText = posEl ? posEl.textContent.trim() : "";
+    const domPosSec = parseDomClockSeconds(domPosText);
+    const domDurSec = durEl ? parseDomClockSeconds(durEl.textContent.trim()) : -1;
+
+    if (domPosText && domPosText !== playback.lastDomText) {
+      playback.lastDomText = domPosText;
+      playback.lastDomChangeWallMs = Date.now();
+    }
+
+    if (titleNode && !playback.title) {
+      playback.title = titleNode.textContent.trim();
+    }
+    if (artistNodes.length > 0 && !playback.artist) {
+      playback.artist = Array.from(artistNodes).map((n) => n.textContent.trim()).filter(Boolean).join(", ");
+    }
+
+    let domPaused = null;
+    if (domPosText && Date.now() - playback.lastDomChangeWallMs < 1500) {
+      domPaused = false;
+    } else if (playBtn) {
+      const lbl = (playBtn.getAttribute("aria-label") || "").toLowerCase();
+      if (lbl.includes("pause")) domPaused = false;
+      else if (lbl.includes("play")) domPaused = true;
+    }
+
+    return { domPosSec, domDurSec, domPaused };
+  }
+
+  function applyPlayerState(raw) {
+    if (!raw || typeof raw !== "object") return;
+    const item = raw.item || raw.track;
+    const newUri = item && item.uri ? String(item.uri) : "";
+
+    if (item) {
+      playback.title = item.name || item.metadata?.title || playback.title;
+      if (Array.isArray(item.artists) && item.artists.length > 0) {
+        playback.artist = item.artists.map((a) => a.name).filter(Boolean).join(", ");
+      } else if (item.metadata?.artist_name) {
+        playback.artist = item.metadata.artist_name;
+      }
+      const dMs = Number(item.duration?.milliseconds ?? raw.duration ?? item.metadata?.duration ?? 0);
+      if (dMs > 0) playback.durationMs = dMs;
+    }
+
+    const rawPaused = raw.isPaused ?? raw.is_paused;
+    if (typeof rawPaused === "boolean") {
+      playback.isPaused = rawPaused;
+    }
+
+    const spd = Number(raw.speed ?? raw.playbackSpeed ?? 1);
+    playback.speed = spd > 0 && spd < 5 ? spd : 1;
+
+    const posAsOf = Number(raw.positionAsOfTimestamp ?? raw.position_as_of_timestamp);
+    const ts = Number(raw.timestamp);
+
+    if (!Number.isNaN(posAsOf) && posAsOf >= 0) {
+      playback.anchorPosMs = posAsOf;
+      playback.anchorWallMs = !Number.isNaN(ts) && ts > 1000000000000 ? ts : Date.now();
+    }
+
+    if (newUri && newUri !== playback.trackUri) {
+      playback.trackUri = newUri;
+      resetMeterTransientState();
+      ensureTrackAudioData(newUri);
+    }
+
+    updateFooterMeta();
+  }
+
+  function resetMeterTransientState() {
+    meter.lastBeatIndex = -1;
+    meter.prevRawBass = 0;
+    meter.avgFlux = 0.05;
+    meter.beatPulse = 0.55;
+  }
+
+  function pollPlaybackClock() {
+    if (!apis.player) {
+      scanReactApis(false);
+    }
+    if (apis.player && typeof apis.player.getState === "function") {
+      try {
+        const s = apis.player.getState();
+        if (s && typeof s.then === "function") {
+          s.then((res) => applyPlayerState(res)).catch(() => {});
+        } else if (s) {
+          applyPlayerState(s);
+        }
+      } catch {}
+    }
+
+    const hints = readDomPlaybackHints();
+    if (hints.domDurSec > 0 && playback.durationMs <= 0) {
+      playback.durationMs = hints.domDurSec * 1000;
+    }
+
+    if (!apis.player && hints.domPaused !== null) {
+      playback.isPaused = hints.domPaused;
+    }
+
+    const nowWall = Date.now();
+    let computedPosMs = playback.anchorPosMs;
+    if (!playback.isPaused && playback.anchorWallMs > 0) {
+      computedPosMs += Math.max(0, nowWall - playback.anchorWallMs) * playback.speed;
+    }
+
+    if (hints.domPosSec >= 0) {
+      const domMs = hints.domPosSec * 1000;
+      if (playback.anchorWallMs === 0 || Math.abs(computedPosMs - domMs) > 1600) {
+        playback.anchorPosMs = domMs + (playback.isPaused ? 0 : 250);
+        playback.anchorWallMs = nowWall;
+        computedPosMs = playback.anchorPosMs;
+      }
+    }
+
+    if (playback.durationMs > 0) {
+      computedPosMs = Math.max(0, Math.min(playback.durationMs, computedPosMs));
+    }
+    playback.interpPosMs = computedPosMs;
+
+    if (playback.trackUri && !audioCache.has(playback.trackUri) && !pendingFetches.has(playback.trackUri)) {
+      ensureTrackAudioData(playback.trackUri);
+    }
+
+    updateFooterMeta();
+  }
+
+  function applyCachedAudioData(entry) {
+    if (!entry) return;
+    features.sourceMode = entry.sourceMode || "fallback";
+    features.bpm = entry.bpm > 20 ? entry.bpm : 120;
+    features.lows = entry.lows || null;
+    features.mids = entry.mids || null;
+    features.highs = entry.highs || null;
+    features.windowMs = entry.windowMs || 40;
+    features.onsets = entry.onsets || null;
+    features.loudness = entry.loudness || null;
+    features.loudnessStartMs = entry.loudnessStartMs || 0;
+    features.loudnessPeriodMs = entry.loudnessPeriodMs || 40;
+    features.beats = entry.beats || null;
+    features.tatums = entry.tatums || null;
+    features.segments = entry.segments || null;
+    updateAudioStatusPill();
+  }
+
+  async function ensureTrackAudioData(uri) {
+    if (!uri) return;
+    if (audioCache.has(uri)) {
+      applyCachedAudioData(audioCache.get(uri));
+      return;
+    }
+    if (pendingFetches.has(uri)) return;
+    pendingFetches.add(uri);
+
+    const record = {
+      sourceMode: "synth",
+      bpm: 120,
+      lows: null,
+      mids: null,
+      highs: null,
+      windowMs: 40,
+      onsets: null,
+      loudness: null,
+      loudnessStartMs: 0,
+      loudnessPeriodMs: 40,
+      beats: null,
+      tatums: null,
+      segments: null
+    };
 
     try {
-      spRequestBuilder
-        .build()
-        .withHost("https://spclient.wg.spotify.com")
-        .withPath("/audio-attributes/v1/audio-analysis/" + trackId)
-        .withEndpointIdentifier("/audio-attributes/v1/audio-analysis/")
-        .send()
-        .then(function (res) {
-          if (currentTrackId !== trackId) return;
-          var body = typeof res.body === "string" ? JSON.parse(res.body) : res.body;
-          if (!body || !body.segments) return;
+      if (!apis.metadataExtensions || !apis.requestBuilder) {
+        scanReactApis(true);
+      }
 
-          var segs = body.segments;
-          var nSeg = segs.length;
-          var segStart = new Float32Array(nSeg);
-          var segDur = new Float32Array(nSeg);
-          var segLoudStart = new Float32Array(nSeg);
-          var segLoudMax = new Float32Array(nSeg);
-          var segLoudMaxTime = new Float32Array(nSeg);
-          var segBass = new Float32Array(nSeg);
-          var segSharp = new Float32Array(nSeg);
-          var segPitches = new Float32Array(nSeg * 12);
+      const tasks = [];
 
-          for (var i = 0; i < nSeg; i++) {
-            var s = segs[i];
-            segStart[i] = s.start || 0;
-            segDur[i] = s.duration || 0.1;
-            segLoudStart[i] = s.loudness_start != null ? s.loudness_start : -30;
-            segLoudMax[i] = s.loudness_max != null ? s.loudness_max : -20;
-            segLoudMaxTime[i] = s.loudness_max_time || 0.02;
-            var t = s.timbre || [];
-            segBass[i] = t.length > 1 ? Math.max(-1, Math.min(1, (80 - t[1]) / 120)) : 0;
-            segSharp[i] = t.length > 2 ? Math.max(-1, Math.min(1, t[2] / 100)) : 0;
-            var p = s.pitches || [];
-            var baseP = i * 12;
-            for (var k = 0; k < 12; k++) {
-              segPitches[baseP + k] = p[k] != null ? p[k] : 0.2;
-            }
-          }
+      if (apis.metadataExtensions && typeof apis.metadataExtensions.fetch === "function") {
+        tasks.push(
+          apis.metadataExtensions
+            .fetch([uri, 237, 222, 217, 142])
+            .then((res) => {
+              const map = res && (res[uri] || res);
+              if (!map) return;
 
-          var beats = body.beats || [];
-          var nBeat = beats.length;
-          var beatStart = new Float32Array(nBeat);
-          var beatDur = new Float32Array(nBeat);
-          var beatConf = new Float32Array(nBeat);
-          for (var b = 0; b < nBeat; b++) {
-            beatStart[b] = beats[b].start || 0;
-            beatDur[b] = beats[b].duration || 0.5;
-            beatConf[b] = beats[b].confidence != null ? beats[b].confidence : 0.6;
-          }
+              const attr = map[222] || map.AUDIO_ATTRIBUTES_V2;
+              if (attr && Number(attr.bpm) > 20) {
+                record.bpm = Math.round(Number(attr.bpm));
+              }
 
-          var bars = body.bars || [];
-          var nBar = bars.length;
-          var barStart = new Float32Array(nBar);
-          for (var r = 0; r < nBar; r++) {
-            barStart[r] = bars[r].start || 0;
-          }
+              const beatsExt = map[217] || map.BEATS;
+              if (beatsExt && beatsExt.beats && beatsExt.beats.length > 0) {
+                const rawBeats = Array.from(beatsExt.beats)
+                  .map((b) => Number(b.time))
+                  .filter((t) => Number.isFinite(t) && t >= 0);
+                if (rawBeats.length > 1) {
+                  record.beats = rawBeats.map((t) => t * 1000);
+                  if (!attr || !Number(attr.bpm)) {
+                    const avgDiffSec = (rawBeats[rawBeats.length - 1] - rawBeats[0]) / (rawBeats.length - 1);
+                    if (avgDiffSec > 0.25 && avgDiffSec < 2.0) {
+                      record.bpm = Math.round(60 / avgDiffSec);
+                    }
+                  }
+                }
+              }
 
-          trackAnalysis = {
-            nSeg: nSeg,
-            segStart: segStart,
-            segDur: segDur,
-            segLoudStart: segLoudStart,
-            segLoudMax: segLoudMax,
-            segLoudMaxTime: segLoudMaxTime,
-            segBass: segBass,
-            segSharp: segSharp,
-            segPitches: segPitches,
-            nBeat: nBeat,
-            beatStart: beatStart,
-            beatDur: beatDur,
-            beatConf: beatConf,
-            nBar: nBar,
-            barStart: barStart
-          };
-          lastBarIdx = -1;
-          lastBeatIdx = -1;
-        })
-        .catch(function () {});
-    } catch (e) {}
+              const wf = map[237] || map.THREEBAND_WAVEFORMS;
+              if (wf && wf.sampleWindowSizeMs > 0 && wf.lows && wf.lows.length > 0) {
+                record.windowMs = Number(wf.sampleWindowSizeMs) || 40;
+                record.lows = normalizeSeries(wf.lows);
+                record.mids = normalizeSeries(wf.mids && wf.mids.length ? wf.mids : wf.lows);
+                record.highs = normalizeSeries(wf.highs && wf.highs.length ? wf.highs : wf.mids || wf.lows);
+                record.onsets = detectOnsetEnvelope(record.lows, record.mids, record.windowMs);
+                record.sourceMode = "3-band";
+              }
+
+              const lta = map[142] || map.LIST_TUNER_AUDIO_ANALYSIS;
+              if (lta && lta.loudness && lta.loudness.length > 0) {
+                record.loudnessStartMs = Number(lta.startMs) || 0;
+                record.loudnessPeriodMs = Number(lta.periodMs) || 40;
+                record.loudness = normalizeSeries(lta.loudness);
+                if (record.sourceMode === "synth") record.sourceMode = "loudness";
+              }
+            })
+            .catch(() => {})
+        );
+      }
+
+      const trackId = extractTrackId(uri);
+      if (trackId && apis.requestBuilder && typeof apis.requestBuilder.build === "function") {
+        tasks.push(
+          (async () => {
+            try {
+              const req = apis.requestBuilder
+                .build()
+                .withHost("https://spclient.wg.spotify.com")
+                .withPath(`/audio-attributes/v1/audio-analysis/${trackId}`)
+                .withQueryParameters({ format: "json" });
+              const sent = typeof req.send === "function" ? await req.send() : null;
+              const body = sent && (sent.body || sent);
+              if (body && typeof body === "object") {
+                if (body.track && Number(body.track.tempo) > 20) {
+                  record.bpm = Math.round(Number(body.track.tempo));
+                }
+                if (Array.isArray(body.beats) && body.beats.length > 0) {
+                  record.beats = body.beats.map((b) => b.start * 1000);
+                }
+                if (Array.isArray(body.tatums) && body.tatums.length > 0) {
+                  record.tatums = body.tatums.map((t) => t.start * 1000);
+                }
+                if (Array.isArray(body.segments) && body.segments.length > 0) {
+                  record.segments = body.segments;
+                  record.sourceMode = record.lows ? "full-hd" : "analysis";
+                }
+              }
+            } catch {}
+          })()
+        );
+      }
+
+      await Promise.all(tasks);
+      if (record.sourceMode === "synth" && !record.bpm) {
+        const seed = hashTrackSeed(uri);
+        record.bpm = 96 + (seed % 44);
+      }
+
+      if (audioCache.size > 40) {
+        const firstKey = audioCache.keys().next().value;
+        if (firstKey) audioCache.delete(firstKey);
+      }
+      audioCache.set(uri, record);
+
+      if (playback.trackUri === uri) {
+        applyCachedAudioData(record);
+      }
+    } finally {
+      pendingFetches.delete(uri);
+    }
   }
 
-  function binarySearchTime(arr, n, t) {
-    var lo = 0;
-    var hi = n - 1;
-    var ans = 0;
+  function bSearchIndex(arr, targetMs) {
+    let lo = 0;
+    let hi = arr.length - 1;
+    let best = 0;
     while (lo <= hi) {
-      var mid = (lo + hi) >>> 1;
-      if (arr[mid] <= t) {
-        ans = mid;
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid] <= targetMs) {
+        best = mid;
         lo = mid + 1;
       } else {
         hi = mid - 1;
       }
     }
-    return ans;
+    return best;
   }
 
-  function triggerColorAdvance() {
-    if (!settings.rgbRotation) return;
-    paletteIdx = (paletteIdx + 1) % WMP_PALETTES.length;
-    targetHue = WMP_PALETTES[paletteIdx];
-  }
+  function updateAudioFeatures(dtSec, nowMs) {
+    const sens = SENSITIVITY_MAP[config.sensitivity] || 1.08;
+    const isPlaying = !playback.isPaused && !!playback.trackUri;
 
-  function updateAudioTelemetry(nowMs) {
-    connectSpotifyInternalAPIs();
-
-    var dtSec = lastTelemetryMs > 0 ? Math.min(0.25, Math.max(0.005, (nowMs - lastTelemetryMs) * 0.001)) : 0.033;
-    lastTelemetryMs = nowMs;
-
-    var wallNow = Date.now();
-    if (spPlayerAPI && spPlayerAPI.getState) {
-      var st = spPlayerAPI.getState();
-      if (st) {
-        isMusicPlaying = !st.isPaused;
-        var basePos = Number(st.positionAsOfTimestamp) || 0;
-        var ts = Number(st.timestamp) || wallNow;
-        var dur = Number(st.duration) || (st.item && Number(st.item.duration)) || 0;
-        if (dur > 1000) trackDurationSec = dur * 0.001;
-
-        var anchorKey = basePos + ":" + ts + ":" + (isMusicPlaying ? 1 : 0);
-        if (anchorKey !== lastAnchorRaw) {
-          lastAnchorRaw = anchorKey;
-          var elapsedMs = ts > 1000000000000 ? Math.max(0, wallNow - ts) : Math.max(0, nowMs - ts);
-          if (elapsedMs > 600000) elapsedMs = 0;
-          localPlayPosSec = (isMusicPlaying ? basePos + elapsedMs : basePos) * 0.001;
-        } else if (isMusicPlaying) {
-          localPlayPosSec += dtSec;
-        }
-
-        var item = st.item;
-        if (item && item.uri) {
-          var parts = item.uri.split(":");
-          var tid = parts.length > 2 ? parts[2] : "";
-          if (tid && tid !== currentTrackId) {
-            currentTrackId = tid;
-            currentTrackTitle = item.name || (item.metadata && item.metadata.title) || "";
-            currentTrackArtist = (item.metadata && item.metadata.artist_name) || "";
-            localPlayPosSec = basePos * 0.001;
-            updateHudInfo();
-            fetchAudioAnalysis(tid);
-          }
-        }
+    if (!isPlaying) {
+      const decay = Math.exp(-dtSec * 6.5);
+      meter.bass *= decay;
+      meter.mid *= decay;
+      meter.high *= decay;
+      meter.energy *= decay;
+      meter.beatPulse *= Math.exp(-dtSec * 9.0);
+      meter.flux *= decay;
+      for (let i = 0; i < 48; i++) {
+        meter.bins[i] *= decay;
+        meter.peaks[i] = Math.max(meter.bins[i], meter.peaks[i] - dtSec * 0.42);
       }
-    } else {
-      var playBtn = document.querySelector('[data-testid="control-button-playpause"]');
-      if (playBtn) {
-        var label = (playBtn.getAttribute("aria-label") || "").toLowerCase();
-        isMusicPlaying = label.indexOf("pause") !== -1;
+      for (let i = 0; i < 128; i++) {
+        meter.wave[i] *= decay;
       }
-      if (isMusicPlaying) localPlayPosSec += dtSec;
+      return false;
     }
 
-    var posSec = localPlayPosSec;
+    const posMs = playback.interpPosMs + dtSec * 1000 * playback.speed;
+    playback.interpPosMs = posMs;
 
-    if (!isMusicPlaying) {
-      smoothBass *= 0.84;
-      smoothMid *= 0.84;
-      smoothHigh *= 0.84;
-      beatPulse *= 0.82;
-      barShock *= 0.82;
-      for (var z = 0; z < 24; z++) {
-        waveHarmonics[z] *= 0.85;
+    const bpm = features.bpm > 20 ? features.bpm : 120;
+    const beatPeriodMs = 60000 / bpm;
+    const exactBeat = posMs / beatPeriodMs;
+    const beatIdx = Math.floor(exactBeat);
+    const beatFrac = exactBeat - beatIdx;
+
+    let rawBass = 0;
+    let rawMid = 0;
+    let rawHigh = 0;
+    let rawOnset = 0;
+    let pitches = null;
+
+    if (features.lows && features.lows.length > 0) {
+      const wMs = features.windowMs || 40;
+      const fIdx = Math.max(0, Math.min(features.lows.length - 1.001, posMs / wMs));
+      const idx0 = Math.floor(fIdx);
+      const frac = fIdx - idx0;
+      const idx1 = Math.min(features.lows.length - 1, idx0 + 1);
+
+      rawBass = features.lows[idx0] * (1 - frac) + features.lows[idx1] * frac;
+      rawMid = features.mids[idx0] * (1 - frac) + features.mids[idx1] * frac;
+      rawHigh = features.highs[idx0] * (1 - frac) + features.highs[idx1] * frac;
+      if (features.onsets) {
+        rawOnset = features.onsets[idx0] * (1 - frac) + features.onsets[idx1] * frac;
       }
+    }
+
+    if (features.segments && features.segments.length > 0) {
+      const sec = posMs / 1000;
+      let sLo = 0;
+      let sHi = features.segments.length - 1;
+      let sIdx = 0;
+      while (sLo <= sHi) {
+        const sMid = (sLo + sHi) >>> 1;
+        if (features.segments[sMid].start <= sec) {
+          sIdx = sMid;
+          sLo = sMid + 1;
+        } else {
+          sHi = sMid - 1;
+        }
+      }
+      const seg = features.segments[sIdx];
+      if (seg) {
+        pitches = seg.pitches;
+        const rel = Math.max(0, sec - seg.start);
+        const env = rel < 0.06 ? rel / 0.06 : Math.exp(-(rel - 0.06) * 4.5);
+        const normLoud = Math.max(0, Math.min(1, ((seg.loudness_max ?? -12) + 36) / 36));
+        if (!features.lows) {
+          rawBass = normLoud * env * (pitches ? (pitches[0] + pitches[1] + pitches[2]) / 2.2 : 0.85);
+          rawMid = normLoud * env * (pitches ? (pitches[4] + pitches[5] + pitches[7]) / 2.2 : 0.78);
+          rawHigh = normLoud * env * (pitches ? (pitches[9] + pitches[10] + pitches[11]) / 2.2 : 0.7);
+          rawOnset = env > 0.78 ? normLoud : 0;
+        }
+      }
+    }
+
+    if (!features.lows && !features.segments && features.loudness && features.loudness.length > 0) {
+      const pMs = features.loudnessPeriodMs || 40;
+      const idx = Math.max(0, Math.min(features.loudness.length - 1, Math.floor((posMs - features.loudnessStartMs) / pMs)));
+      const loud = features.loudness[idx];
+      const kickEnv = Math.exp(-beatFrac * 5.2);
+      const snareEnv = Math.exp(-((beatFrac + 0.5) % 1) * 7.5);
+      rawBass = Math.min(1, loud * (0.55 + 0.65 * kickEnv));
+      rawMid = Math.min(1, loud * (0.48 + 0.55 * snareEnv));
+      rawHigh = Math.min(1, loud * (0.35 + 0.45 * Math.sin(exactBeat * Math.PI * 4) * 0.5 + 0.25));
+      rawOnset = kickEnv > 0.75 ? loud : 0;
+    }
+
+    if (!features.lows && !features.segments && !features.loudness) {
+      const seed = hashTrackSeed(playback.trackUri || "velvet");
+      const groove = (seed % 7) * 0.14;
+      const kickEnv = Math.exp(-beatFrac * 5.5);
+      const halfBeatFrac = (exactBeat * 2) - Math.floor(exactBeat * 2);
+      const snareEnv = (beatIdx % 2 === 1 ? 1 : 0.42) * Math.exp(-beatFrac * 6.5);
+      const hatEnv = Math.exp(-halfBeatFrac * 9.0);
+      const phrase = 0.72 + 0.28 * Math.sin(posMs * 0.0005 + groove);
+      rawBass = Math.min(1, (0.24 + 0.76 * kickEnv) * phrase);
+      rawMid = Math.min(1, (0.22 + 0.68 * snareEnv) * phrase);
+      rawHigh = Math.min(1, (0.18 + 0.72 * hatEnv) * phrase);
+      rawOnset = beatIdx !== meter.lastBeatIndex ? 0.88 : 0;
+    }
+
+    let beatTriggered = false;
+    if (features.beats && features.beats.length > 0) {
+      const bi = bSearchIndex(features.beats, posMs);
+      if (bi !== meter.lastBeatIndex && Math.abs(posMs - features.beats[bi]) < 90) {
+        meter.lastBeatIndex = bi;
+        beatTriggered = true;
+      }
+    } else if (beatIdx !== meter.lastBeatIndex) {
+      meter.lastBeatIndex = beatIdx;
+      if (rawBass > 0.22 || rawOnset > 0.28 || !features.lows) {
+        beatTriggered = true;
+      }
+    }
+
+    const posDelta = Math.max(0, rawBass - meter.prevRawBass);
+    meter.prevRawBass = rawBass;
+    meter.flux = meter.flux * 0.6 + (posDelta * 3.5 + rawOnset * 0.6) * 0.4;
+    meter.avgFlux = meter.avgFlux * 0.96 + meter.flux * 0.04;
+
+    if (!beatTriggered && meter.flux > Math.max(0.24, meter.avgFlux * 2.05) && nowMs - meter.lastOnsetWallMs > Math.max(190, beatPeriodMs * 0.48)) {
+      beatTriggered = true;
+    }
+
+    if (beatTriggered) {
+      meter.beatPulse = 1;
+      meter.lastOnsetWallMs = nowMs;
+    } else {
+      meter.beatPulse *= Math.exp(-dtSec * (5.2 + bpm / 38));
+    }
+
+    const tBass = Math.min(1.4, (rawBass * 0.85 + meter.beatPulse * 0.42) * sens);
+    const tMid = Math.min(1.4, (rawMid * 0.92 + rawBass * 0.16) * sens);
+    const tHigh = Math.min(1.4, (rawHigh * 0.95 + meter.flux * 0.35) * sens);
+
+    const kAttack = 1 - Math.exp(-dtSec * 28);
+    const kRelease = 1 - Math.exp(-dtSec * 7.5);
+    meter.bass += (tBass - meter.bass) * (tBass > meter.bass ? kAttack : kRelease);
+    meter.mid += (tMid - meter.mid) * (tMid > meter.mid ? kAttack : kRelease);
+    meter.high += (tHigh - meter.high) * (tHigh > meter.high ? kAttack : kRelease);
+    meter.energy = meter.bass * 0.48 + meter.mid * 0.34 + meter.high * 0.18;
+
+    const tSec = posMs * 0.001;
+    for (let i = 0; i < 48; i++) {
+      const normF = i / 47;
+      let bandBase;
+      if (i < 14) {
+        const w = i / 14;
+        bandBase = meter.bass * (1 - w * 0.45) + meter.mid * (w * 0.35);
+      } else if (i < 33) {
+        const w = (i - 14) / 19;
+        bandBase = meter.mid * (1 - Math.abs(w - 0.5) * 0.35) + meter.bass * ((1 - w) * 0.28) + meter.high * (w * 0.35);
+      } else {
+        const w = (i - 33) / 14;
+        bandBase = meter.high * (0.72 + w * 0.42) + meter.mid * ((1 - w) * 0.25);
+      }
+
+      const pitchVal = pitches ? pitches[i % 12] : (0.52 + 0.48 * Math.sin(tSec * (4.2 + (i % 7) * 1.3) + i * 0.65));
+      const ripple = 0.58 + 0.42 * Math.sin(tSec * (7.5 + i * 0.95) - normF * 9.0 + meter.beatPulse * 2.2) * Math.cos(tSec * 3.1 + i * 1.4);
+      const binTarget = Math.max(0.02, Math.min(1.0, bandBase * (0.52 + pitchVal * 0.42) * ripple + meter.beatPulse * (i < 12 ? 0.26 : 0.09)));
+
+      const bLerp = binTarget > meter.bins[i] ? kAttack : kRelease;
+      meter.bins[i] += (binTarget - meter.bins[i]) * bLerp;
+      if (meter.bins[i] > meter.peaks[i]) {
+        meter.peaks[i] = meter.bins[i];
+      } else {
+        meter.peaks[i] = Math.max(meter.bins[i], meter.peaks[i] - dtSec * 0.38);
+      }
+    }
+
+    for (let i = 0; i < 128; i++) {
+      const p = (i / 128) * Math.PI * 2;
+      const w1 = Math.sin(p * 2 + tSec * 7.2) * (0.35 + meter.bass * 0.85);
+      const w2 = Math.sin(p * 6 - tSec * 12.5) * (0.22 + meter.mid * 0.65);
+      const w3 = Math.sin(p * 17 + tSec * 23.0) * (0.12 + meter.high * 0.55);
+      const wBeat = Math.cos(p * 4 + tSec * 4.5) * meter.beatPulse * 0.35;
+      meter.wave[i] = Math.max(-1.2, Math.min(1.2, w1 + w2 + w3 + wBeat));
+    }
+
+    runtime.phase += dtSec * (1.2 + meter.energy * 3.6 + (bpm / 120) * 0.8);
+    runtime.spiralPhase += dtSec * (0.45 + meter.bass * 1.65 + meter.beatPulse * 0.9);
+    runtime.tunnelPhase += dtSec * (0.55 + meter.energy * 1.9);
+
+    if (config.rgbRotate) {
+      runtime.rotHue = (runtime.rotHue + dtSec * (22 + meter.energy * 42)) % 360;
+    } else {
+      runtime.rotHue = config.hue;
+    }
+
+    return true;
+  }
+
+  function hslColor(hueOffset, alpha, lightBoost) {
+    const h = ((runtime.rotHue + hueOffset) % 360 + 360) % 360;
+    const s = config.rgbRotate ? Math.max(76, config.sat) : config.sat;
+    const l = Math.max(18, Math.min(92, 54 + (lightBoost || 0)));
+    return `hsla(${h.toFixed(1)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%, ${alpha.toFixed(3)})`;
+  }
+
+  function renderTunnel(w, h) {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const minDim = Math.min(w, h);
+    const fbW = fbCanvas.width;
+    const fbH = fbCanvas.height;
+
+    fbCtx.save();
+    fbCtx.globalCompositeOperation = "copy";
+    fbCtx.globalAlpha = 1;
+    fbCtx.fillStyle = "#000000";
+    fbCtx.fillRect(0, 0, fbW, fbH);
+    fbCtx.restore();
+
+    fbCtx.save();
+    fbCtx.fillStyle = `rgba(6, 1, 3, ${(0.12 + (1 - Math.min(1, meter.energy)) * 0.14).toFixed(3)})`;
+    fbCtx.fillRect(0, 0, fbW, fbH);
+    const zoom = 1.028 + meter.bass * 0.042 + meter.beatPulse * 0.036;
+    const rot = Math.sin(runtime.tunnelPhase * 0.45) * 0.012 + meter.mid * 0.008;
+    fbCtx.translate(fbW * 0.5, fbH * 0.5);
+    fbCtx.rotate(rot);
+    fbCtx.scale(zoom, zoom);
+    fbCtx.globalAlpha = 0.88;
+    fbCtx.drawImage(canvas, -fbW * 0.5, -fbH * 0.5, fbW, fbH);
+    fbCtx.restore();
+
+    ctx.globalCompositeOperation = "copy";
+    ctx.drawImage(fbCanvas, 0, 0, w, h);
+    ctx.globalCompositeOperation = "lighter";
+
+    const strands = 6;
+    const pts = 112;
+    const baseR = minDim * (0.20 + meter.bass * 0.085 + meter.beatPulse * 0.045);
+
+    for (let s = 0; s < strands; s++) {
+      const strandShift = (s / strands) * Math.PI * 2;
+      const hueOff = (s * 42) - 40;
+      ctx.beginPath();
+      ctx.lineWidth = s === 0 ? 2.4 : 1.5;
+      ctx.strokeStyle = hslColor(hueOff, s === 0 ? 0.92 : 0.58, s === 0 ? 18 : 6);
+
+      for (let i = 0; i <= pts; i++) {
+        const a = (i / pts) * Math.PI * 2;
+        const wIdx = Math.floor((i / pts) * 127);
+        const wVal = meter.wave[(wIdx + s * 19) & 127];
+        const bVal = meter.bins[(i + s * 7) % 48];
+        const sharpSpike = Math.sin(a * (5 + s) + runtime.phase * (1.2 + s * 0.25)) * (6 + meter.high * 22);
+        const r = baseR + wVal * minDim * (0.045 + meter.mid * 0.055) + bVal * minDim * 0.045 + sharpSpike;
+        const px = cx + Math.cos(a + strandShift * 0.08) * r;
+        const py = cy + Math.sin(a + strandShift * 0.08) * r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderSpiral(w, h) {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const maxR = Math.min(w, h) * 0.47;
+
+    ctx.fillStyle = "rgba(8, 2, 4, 0.20)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "lighter";
+
+    const arms = 5;
+    const steps = 84;
+    for (let a = 0; a < arms; a++) {
+      const baseAngle = (a / arms) * Math.PI * 2 + runtime.spiralPhase;
+      ctx.beginPath();
+      ctx.lineWidth = 2.0 + meter.bass * 1.4;
+      ctx.strokeStyle = hslColor(a * 45, 0.85, 10);
+
+      for (let i = 0; i < steps; i++) {
+        const t = i / (steps - 1);
+        const bin = meter.bins[Math.floor(t * 47)];
+        const radius = t * maxR * (0.85 + meter.bass * 0.22);
+        const theta = baseAngle + t * (4.6 + meter.mid * 1.8) + Math.sin(t * 10 - runtime.phase) * (0.18 + bin * 0.35);
+        const wobble = bin * 28 * Math.sin(t * 14 + runtime.phase);
+        const x = cx + Math.cos(theta) * (radius + wobble);
+        const y = cy + Math.sin(theta) * (radius + wobble);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    const coreR = 16 + meter.bass * 32 + meter.beatPulse * 24;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2.2);
+    grad.addColorStop(0, hslColor(0, 0.85, 28));
+    grad.addColorStop(0.5, hslColor(25, 0.38, 10));
+    grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderStarburst(w, h) {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const minDim = Math.min(w, h);
+
+    ctx.fillStyle = "rgba(8, 2, 4, 0.17)";
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "lighter";
+
+    const layers = 7;
+    const pts = 96;
+    for (let l = 0; l < layers; l++) {
+      const k = l / (layers - 1);
+      const baseR = minDim * (0.09 + k * 0.31) * (0.86 + meter.bass * 0.28 + meter.beatPulse * 0.14);
+      const lobes = 6 + (l % 3) * 2;
+      ctx.beginPath();
+      ctx.lineWidth = 1.6 + (1 - k) * 1.4;
+      ctx.strokeStyle = hslColor(l * 34 - 30, 0.72 - k * 0.25, 12);
+
+      for (let i = 0; i <= pts; i++) {
+        const ang = (i / pts) * Math.PI * 2;
+        const bin = meter.bins[(i + l * 5) % 48];
+        const amp = Math.sin(ang * lobes + runtime.phase * (l % 2 === 0 ? 1 : -1)) * (14 + meter.mid * 36) + bin * (24 + meter.high * 38);
+        const r = Math.max(8, baseR + amp);
+        const x = cx + Math.cos(ang) * r;
+        const y = cy + Math.sin(ang) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderScope(w, h) {
+    ctx.fillStyle = "rgba(9, 2, 5, 0.32)";
+    ctx.fillRect(0, 0, w, h);
+
+    const padX = Math.max(24, w * 0.05);
+    const usableW = w - padX * 2;
+    const barCount = 48;
+    const slotW = usableW / barCount;
+    const barW = Math.max(4, slotW * 0.7);
+    const cy = h * 0.5;
+    const maxBarH = h * 0.34;
+
+    ctx.globalCompositeOperation = "lighter";
+
+    for (let i = 0; i < barCount; i++) {
+      const val = meter.bins[i];
+      const peakVal = meter.peaks[i];
+      const x = padX + i * slotW + (slotW - barW) * 0.5;
+      const barH = Math.max(3, val * maxBarH);
+      const peakYOff = peakVal * maxBarH;
+
+      const grad = ctx.createLinearGradient(x, cy - barH, x, cy + barH);
+      grad.addColorStop(0, hslColor(i * 3.5 + 20, 0.92, 22));
+      grad.addColorStop(0.5, hslColor(i * 2.0, 0.75, 4));
+      grad.addColorStop(1, hslColor(i * 3.5 + 20, 0.92, 22));
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, cy - barH, barW, barH * 2);
+
+      ctx.fillStyle = hslColor(i * 3.5 + 35, 0.96, 32);
+      ctx.fillRect(x, cy - peakYOff - 3, barW, 2.5);
+      ctx.fillRect(x, cy + peakYOff + 0.5, barW, 2.5);
+    }
+
+    ctx.beginPath();
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = hslColor(10, 0.95, 28);
+    for (let i = 0; i < 128; i++) {
+      const x = padX + (i / 127) * usableW;
+      const y = cy + meter.wave[i] * h * (0.09 + meter.energy * 0.11);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = hslColor(55, 0.72, 22);
+    for (let i = 0; i < 128; i++) {
+      const x = padX + (i / 127) * usableW;
+      const y = cy - meter.wave[(i + 32) & 127] * h * (0.06 + meter.high * 0.08);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderCyber(w, h) {
+    const cx = w * 0.5;
+    const horizonY = h * 0.46;
+    const orbY = horizonY - Math.min(w, h) * 0.04;
+
+    ctx.fillStyle = "rgba(8, 1, 4, 0.28)";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.strokeStyle = hslColor(-8, 0.52, 6);
+    ctx.lineWidth = 1.2;
+
+    const gridCols = 18;
+    for (let i = -gridCols; i <= gridCols; i++) {
+      const xTop = cx + i * (w * 0.018);
+      const xBot = cx + i * (w * 0.085);
+      ctx.beginPath();
+      ctx.moveTo(xTop, horizonY);
+      ctx.lineTo(xBot, h);
+      ctx.stroke();
+    }
+
+    const zLines = 12;
+    const zScroll = (runtime.tunnelPhase * 0.65) % 1;
+    for (let i = 0; i < zLines; i++) {
+      const frac = Math.pow((i + zScroll) / zLines, 2.2);
+      const y = horizonY + frac * (h - horizonY);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = hslColor(0, 0.9, 24);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, horizonY);
+    ctx.lineTo(w, horizonY);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.globalCompositeOperation = "lighter";
+    const orbR = Math.min(w, h) * (0.14 + meter.bass * 0.045 + meter.beatPulse * 0.025);
+    const spokes = 48;
+
+    for (let i = 0; i < spokes; i++) {
+      const ang = (i / spokes) * Math.PI * 2 + runtime.phase * 0.18;
+      const len = orbR + meter.bins[i] * Math.min(w, h) * 0.16;
+      const x1 = cx + Math.cos(ang) * (orbR * 0.85);
+      const y1 = orbY + Math.sin(ang) * (orbR * 0.85);
+      const x2 = cx + Math.cos(ang) * len;
+      const y2 = orbY + Math.sin(ang) * len;
+
+      ctx.strokeStyle = hslColor(i * 4, 0.88, 18);
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    const sunGrad = ctx.createLinearGradient(cx, orbY - orbR, cx, orbY + orbR);
+    sunGrad.addColorStop(0, hslColor(25, 0.92, 26));
+    sunGrad.addColorStop(0.55, hslColor(0, 0.72, 10));
+    sunGrad.addColorStop(1, hslColor(-20, 0.88, -6));
+    ctx.beginPath();
+    ctx.arc(cx, orbY, orbR * 0.78, 0, Math.PI * 2);
+    ctx.strokeStyle = hslColor(10, 0.95, 25);
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.fillStyle = sunGrad;
+    ctx.globalAlpha = 0.26 + meter.bass * 0.22;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function getMainViewContainer() {
+    return (
+      document.getElementById("main-view") ||
+      document.querySelector(".R1kU6b2KxZc8FWfbYf3m") ||
+      document.querySelector(".main-view-container")
+    );
+  }
+
+  function isOnLyricsRoute() {
+    if (location.pathname.includes("/lyrics")) return true;
+    const lyricsRoot = document.querySelector(".wYWhVPZoG93lR7ogMIug, [data-testid='lyrics-line']");
+    if (!lyricsRoot) return false;
+    const mainView = getMainViewContainer();
+    return !!(mainView && mainView.contains(lyricsRoot));
+  }
+
+  function getHostContainerRect() {
+    if (runtime.isFullscreen || document.fullscreenElement) {
+      return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    }
+    const target = getMainViewContainer();
+    if (target) {
+      const r = target.getBoundingClientRect();
+      if (r.width > 120 && r.height > 120) return r;
+    }
+    return { left: 0, top: 64, width: window.innerWidth, height: Math.max(200, window.innerHeight - 154) };
+  }
+
+  function syncCanvasSize(rect) {
+    if (!canvas || !ctx) return;
+    const mainView = getMainViewContainer();
+    const mountInMainView = !runtime.surfaceMode && !runtime.isFullscreen && !document.fullscreenElement && !!mainView;
+    const targetParent = mountInMainView ? mainView : document.body;
+
+    if (canvas.parentNode !== targetParent) {
+      if (mountInMainView) {
+        mainView.insertBefore(canvas, mainView.firstChild);
+      } else {
+        document.body.appendChild(canvas);
+      }
+    }
+
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    const cw = Math.max(1, Math.floor(rect.width * dpr));
+    const ch = Math.max(1, Math.floor(rect.height * dpr));
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+
+    if (mountInMainView) {
+      setStyleSafe(canvas, "position", "absolute");
+      setStyleSafe(canvas, "left", "0px");
+      setStyleSafe(canvas, "top", "0px");
+      setStyleSafe(canvas, "width", "100%");
+      setStyleSafe(canvas, "height", "100%");
+      setStyleSafe(canvas, "zIndex", "1");
+    } else {
+      setStyleSafe(canvas, "position", "fixed");
+      setStyleSafe(canvas, "left", `${Math.round(rect.left)}px`);
+      setStyleSafe(canvas, "top", `${Math.round(rect.top)}px`);
+      setStyleSafe(canvas, "width", `${Math.round(rect.width)}px`);
+      setStyleSafe(canvas, "height", `${Math.round(rect.height)}px`);
+      setStyleSafe(canvas, "zIndex", "30");
+    }
+
+    const fbDpr = Math.min(1.1, dpr);
+    const fbw = Math.max(1, Math.floor(rect.width * fbDpr));
+    const fbh = Math.max(1, Math.floor(rect.height * fbDpr));
+    if (fbCanvas.width !== fbw || fbCanvas.height !== fbh) {
+      fbCanvas.width = fbw;
+      fbCanvas.height = fbh;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function renderLoop(nowMs) {
+    if (!runtime.visualActive || document.hidden) {
+      runtime.rafId = 0;
       return;
     }
 
-    var activeLyricEl = document.querySelector('[data-testid="fullscreen-lyric"][aria-current="true"], .lyrics-lyricsContent-active');
-    if (activeLyricEl) {
-      var txt = activeLyricEl.textContent || "";
-      if (txt && txt !== lastLyricText) {
-        lastLyricText = txt;
-        barShock = Math.max(barShock, 0.75);
-        edgeAngle = Math.random() * Math.PI * 2;
-        triggerColorAdvance();
-      }
+    const dtSec = runtime.lastFrameMs > 0 ? Math.min(0.05, Math.max(0.001, (nowMs - runtime.lastFrameMs) / 1000)) : 0.016;
+    runtime.lastFrameMs = nowMs;
+
+    const rect = getHostContainerRect();
+    syncCanvasSize(rect);
+
+    const w = rect.width;
+    const h = rect.height;
+
+    const isPlaying = updateAudioFeatures(dtSec, nowMs);
+
+    if (beatLedEl) {
+      const scale = isPlaying ? 1 + meter.beatPulse * 0.55 : 0.85;
+      beatLedEl.style.transform = `scale(${scale.toFixed(2)})`;
+      beatLedEl.style.opacity = isPlaying ? (0.45 + meter.beatPulse * 0.55).toFixed(2) : "0.28";
+      beatLedEl.style.background = isPlaying ? hslColor(0, 1, 18) : "#6b4e57";
+      beatLedEl.style.boxShadow = isPlaying && meter.beatPulse > 0.25 ? `0 0 ${Math.round(8 + meter.beatPulse * 10)}px ${hslColor(0, 0.9, 18)}` : "none";
     }
 
-    var hasValidSegment = false;
-    if (trackAnalysis && trackAnalysis.nSeg > 0) {
-      var ta = trackAnalysis;
-      var lastSegEnd = ta.segStart[ta.nSeg - 1] + (ta.segDur[ta.nSeg - 1] || 1);
-      if (posSec >= 0 && posSec <= lastSegEnd + 2.5) {
-        hasValidSegment = true;
-        var sIdx = binarySearchTime(ta.segStart, ta.nSeg, posSec);
-        var sElapsed = Math.max(0, posSec - ta.segStart[sIdx]);
-        var sDur = Math.max(0.04, ta.segDur[sIdx]);
-        var maxT = Math.max(0.01, ta.segLoudMaxTime[sIdx]);
+    if (config.model === "tunnel") renderTunnel(w, h);
+    else if (config.model === "spiral") renderSpiral(w, h);
+    else if (config.model === "starburst") renderStarburst(w, h);
+    else if (config.model === "scope") renderScope(w, h);
+    else renderCyber(w, h);
 
-        var db = ta.segLoudMax[sIdx];
-        if (sElapsed < maxT) {
-          var rUp = sElapsed / maxT;
-          db = ta.segLoudStart[sIdx] + (ta.segLoudMax[sIdx] - ta.segLoudStart[sIdx]) * rUp;
+    runtime.rafId = requestAnimationFrame(renderLoop);
+  }
+
+  function ensureRenderLoopState() {
+    if (runtime.visualActive && !document.hidden) {
+      syncCanvasSize(getHostContainerRect());
+      setStyleSafe(canvas, "display", "block");
+      setStyleSafe(canvas, "opacity", runtime.surfaceMode || runtime.isFullscreen ? "1" : "0.78");
+      if (!runtime.rafId) {
+        runtime.lastFrameMs = performance.now();
+        runtime.rafId = requestAnimationFrame(renderLoop);
+      }
+    } else {
+      if (runtime.rafId) {
+        cancelAnimationFrame(runtime.rafId);
+        runtime.rafId = 0;
+      }
+      if (canvas) {
+        setStyleSafe(canvas, "opacity", "0");
+        setStyleSafe(canvas, "display", "none");
+      }
+    }
+  }
+
+  function drawColorWheel() {
+    if (!wheelCanvas) return;
+    const wctx = wheelCanvas.getContext("2d");
+    const size = wheelCanvas.width;
+    const r = size / 2;
+    const img = wctx.createImageData(size, size);
+    const data = img.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x - r;
+        const dy = y - r;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const idx = (y * size + x) * 4;
+        if (dist <= r) {
+          let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+          if (deg < 0) deg += 360;
+          const sat = Math.min(1, dist / r);
+          const c = (1 - Math.abs(0 - 0)) * sat;
+          const hp = deg / 60;
+          const xVal = c * (1 - Math.abs((hp % 2) - 1));
+          let r1 = 0, g1 = 0, b1 = 0;
+          if (hp < 1) { r1 = c; g1 = xVal; }
+          else if (hp < 2) { r1 = xVal; g1 = c; }
+          else if (hp < 3) { g1 = c; b1 = xVal; }
+          else if (hp < 4) { g1 = xVal; b1 = c; }
+          else if (hp < 5) { r1 = xVal; b1 = c; }
+          else { r1 = c; b1 = xVal; }
+          const m = 1 - c;
+          data[idx] = Math.round((r1 + m) * 255);
+          data[idx + 1] = Math.round((g1 + m) * 255);
+          data[idx + 2] = Math.round((b1 + m) * 255);
+          data[idx + 3] = 255;
         } else {
-          var nextLoud = sIdx + 1 < ta.nSeg ? ta.segLoudStart[sIdx + 1] : -35;
-          var rDown = Math.min(1, (sElapsed - maxT) / Math.max(0.02, sDur - maxT));
-          db = ta.segLoudMax[sIdx] + (nextLoud - ta.segLoudMax[sIdx]) * rDown;
-        }
-
-        var loudNorm = Math.max(0.12, Math.min(1, (db + 38) / 34));
-        var loudDrop = Math.max(0, (ta.segLoudMax[sIdx] - ta.segLoudStart[sIdx]) / 16);
-        var rawBass = Math.max(0.08, Math.min(1.35, loudNorm * (0.75 + 0.55 * Math.max(0, ta.segBass[sIdx])) + loudDrop * 0.28));
-        var rawHigh = Math.max(0.06, Math.min(1.25, loudNorm * (0.65 + 0.5 * Math.abs(ta.segSharp[sIdx]))));
-
-        if (ta.nBeat > 0) {
-          var bIdx = binarySearchTime(ta.beatStart, ta.nBeat, posSec);
-          var bElapsed = Math.max(0, posSec - ta.beatStart[bIdx]);
-          var bConf = ta.beatConf[bIdx];
-          if (bIdx !== lastBeatIdx && bElapsed < 0.14) {
-            lastBeatIdx = bIdx;
-            beatPulse = Math.max(beatPulse, (0.52 + 0.55 * bConf) * loudNorm);
-            if (rawBass > 0.55 && bConf > 0.45) {
-              throatOffsetX = (Math.random() - 0.5) * 28 * rawBass;
-              throatOffsetY = (Math.random() - 0.5) * 20 * rawBass;
-              edgeAngle = Math.random() * Math.PI * 2;
-            }
-          }
-        }
-
-        if (ta.nBar > 0) {
-          var rIdx = binarySearchTime(ta.barStart, ta.nBar, posSec);
-          if (rIdx !== lastBarIdx && Math.abs(posSec - ta.barStart[rIdx]) < 0.16) {
-            lastBarIdx = rIdx;
-            barShock = Math.max(barShock, 0.88 * loudNorm);
-            triggerColorAdvance();
-            if (Math.random() < 0.45) spiralDir = -spiralDir;
-          }
-        }
-
-        smoothBass = smoothBass * 0.62 + rawBass * 0.38;
-        smoothMid = smoothMid * 0.7 + loudNorm * 0.3;
-        smoothHigh = smoothHigh * 0.66 + rawHigh * 0.34;
-        beatPulse *= 0.84;
-        barShock *= 0.88;
-
-        var pBase = sIdx * 12;
-        for (var p = 0; p < 12; p++) {
-          var pv = ta.segPitches[pBase + p];
-          var osc = Math.sin(posSec * (5.2 + p * 0.85) + p) * 0.18;
-          targetHarmonics[p] = ((pv - 0.28) + osc) * (0.6 + smoothBass * 1.2 + beatPulse * 0.9);
-          targetHarmonics[p + 12] = ((ta.segPitches[pBase + ((p + 5) % 12)] - 0.28) - osc) * (0.5 + smoothHigh * 1.2);
-        }
-        for (var h = 0; h < 24; h++) {
-          waveHarmonics[h] = waveHarmonics[h] * 0.58 + targetHarmonics[h] * 0.42;
+          data[idx + 3] = 0;
         }
       }
     }
-
-    if (!hasValidSegment) {
-      var t = nowMs * 0.001;
-      var gate = 0.28 + 0.72 * Math.max(0, Math.sin(t * 2.1) * Math.cos(t * 0.73 + 0.9));
-      var kick = Math.pow(Math.max(0, Math.sin(t * 6.4 + Math.sin(t * 1.3))), 5) * gate;
-      if (kick > 0.48 && beatPulse < 0.3) {
-        beatPulse = kick * 0.95;
-        edgeAngle = Math.random() * Math.PI * 2;
-        if (Math.random() < 0.25) triggerColorAdvance();
-      }
-      smoothBass = smoothBass * 0.72 + (gate * 0.48 + kick * 0.7) * 0.28;
-      smoothMid = smoothMid * 0.78 + gate * 0.52 * 0.22;
-      smoothHigh = smoothHigh * 0.72 + (0.2 + Math.abs(Math.sin(t * 4.7)) * 0.65) * gate * 0.28;
-      beatPulse *= 0.85;
-      barShock *= 0.88;
-      for (var j = 0; j < 24; j++) {
-        var v = Math.sin(t * (3.6 + j * 0.72) + j * 1.9) * (0.25 + smoothBass * 0.7 + beatPulse * 0.6);
-        waveHarmonics[j] = waveHarmonics[j] * 0.62 + v * 0.38;
-      }
-    }
+    wctx.putImageData(img, 0, 0);
   }
 
-  function hslToRgb(h, s, l) {
-    s /= 100;
-    l /= 100;
-    var k = function (n) {
-      return (n + h / 30) % 12;
-    };
-    var a = s * Math.min(l, 1 - l);
-    var f = function (n) {
-      return l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-    };
-    return [Math.round(255 * f(0)), Math.round(255 * f(8)), Math.round(255 * f(4))];
-  }
-
-  function drawColorWheelWidget() {
-    if (!wheelCanvas || !wheelCtx) return;
-    var size = wheelCanvas.width;
-    var r = size * 0.5;
-    if (!wheelImageCache) {
-      var img = wheelCtx.createImageData(size, size);
-      var data = img.data;
-      for (var y = 0; y < size; y++) {
-        for (var x = 0; x < size; x++) {
-          var dx = x - r;
-          var dy = y - r;
-          var dist = Math.sqrt(dx * dx + dy * dy);
-          var idx = (y * size + x) * 4;
-          if (dist <= r) {
-            var angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-            var sat = Math.min(100, (dist / r) * 100);
-            var rgb = hslToRgb(angle, sat, 52);
-            data[idx] = rgb[0];
-            data[idx + 1] = rgb[1];
-            data[idx + 2] = rgb[2];
-            data[idx + 3] = 255;
-          } else {
-            data[idx + 3] = 0;
-          }
-        }
-      }
-      wheelImageCache = img;
-    }
-    wheelCtx.putImageData(wheelImageCache, 0, 0);
-
-    var activeH = settings.rgbRotation ? currentHue : settings.customHue;
-    var activeS = settings.rgbRotation ? 92 : settings.customSat;
-    var rad = (activeH * Math.PI) / 180;
-    var distPx = (activeS / 100) * (r - 3);
-    var px = r + Math.cos(rad) * distPx;
-    var py = r + Math.sin(rad) * distPx;
-
-    wheelCtx.beginPath();
-    wheelCtx.arc(px, py, 3.5, 0, Math.PI * 2);
-    wheelCtx.strokeStyle = "#000000";
-    wheelCtx.lineWidth = 2.2;
-    wheelCtx.stroke();
-    wheelCtx.strokeStyle = "#ffffff";
-    wheelCtx.lineWidth = 1.2;
-    wheelCtx.stroke();
+  function updateWheelMarker() {
+    if (!wheelMarker || !wheelCanvas) return;
+    const r = wheelCanvas.width / 2;
+    const rad = (config.hue * Math.PI) / 180;
+    const dist = (config.sat / 100) * (r - 2);
+    wheelMarker.style.left = `${(r + Math.cos(rad) * dist).toFixed(1)}px`;
+    wheelMarker.style.top = `${(r + Math.sin(rad) * dist).toFixed(1)}px`;
   }
 
   function pickColorFromWheelEvent(ev) {
     if (!wheelCanvas) return;
-    var rect = wheelCanvas.getBoundingClientRect();
-    var r = rect.width * 0.5;
-    var dx = ev.clientX - rect.left - r;
-    var dy = ev.clientY - rect.top - r;
-    var dist = Math.sqrt(dx * dx + dy * dy);
-    var hue = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
-    var sat = Math.max(25, Math.min(100, (dist / r) * 100));
-
-    settings.customHue = Math.round(hue);
-    settings.customSat = Math.round(sat);
-    settings.rgbRotation = false;
-    currentHue = settings.customHue;
-    targetHue = settings.customHue;
-
-    var rotCb = document.getElementById("wmp-rgb-rot-checkbox");
-    if (rotCb) rotCb.checked = false;
-
-    saveSettings();
-    drawColorWheelWidget();
+    const rect = wheelCanvas.getBoundingClientRect();
+    const r = rect.width / 2;
+    const dx = ev.clientX - (rect.left + r);
+    const dy = ev.clientY - (rect.top + r);
+    let deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (deg < 0) deg += 360;
+    const dist = Math.min(r, Math.sqrt(dx * dx + dy * dy));
+    config.hue = Math.round(deg);
+    config.sat = Math.round((dist / r) * 100);
+    config.rgbRotate = false;
+    runtime.rotHue = config.hue;
+    const cb = document.getElementById("wmp-rgb-rotate-checkbox");
+    if (cb) cb.checked = false;
+    writeStore(STORE_KEYS.hue, config.hue);
+    writeStore(STORE_KEYS.sat, config.sat);
+    writeStore(STORE_KEYS.rgbRotate, "0");
+    updateWheelMarker();
   }
 
-  function ensureCanvasAndHud() {
-    if (!canvas) {
-      canvas = document.createElement("canvas");
-      canvas.id = "spotify-lyrics-visualizer";
-      canvas.width = INTERNAL_W;
-      canvas.height = INTERNAL_H;
-      ctx = canvas.getContext("2d", { alpha: false });
-
-      backCanvas = document.createElement("canvas");
-      backCanvas.width = INTERNAL_W;
-      backCanvas.height = INTERNAL_H;
-      backCtx = backCanvas.getContext("2d", { alpha: false });
-
-      ctx.fillStyle = "#010203";
-      ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-      backCtx.fillStyle = "#010203";
-      backCtx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-    }
-
-      var hostContainer = fullscreenMode ? document.body : document.querySelector(".main-view-container") || document.body;
-      if (hostContainer && canvas.parentElement !== hostContainer) {
-        if (!fullscreenMode && hostContainer.firstChild) {
-          hostContainer.insertBefore(canvas, hostContainer.firstChild);
-        } else {
-          hostContainer.appendChild(canvas);
-        }
-      }
-
-      if (!lyricsToggleBtn && document.body) {
-        lyricsToggleBtn = document.createElement("button");
-        lyricsToggleBtn.id = "wmp-lyrics-viz-toggle";
-        lyricsToggleBtn.type = "button";
-        updateLyricsToggleUI();
-        lyricsToggleBtn.addEventListener("click", function () {
-          settings.lyricsVizOn = !settings.lyricsVizOn;
-          saveSettings();
-          updateLyricsToggleUI();
-          evaluateVisibilityAndLifecycle();
-        });
-        document.body.appendChild(lyricsToggleBtn);
-      }
-
-      if (!hudEl && document.body) {
-        hudEl = document.createElement("div");
-        hudEl.id = "wmp-visualizer-surface-hud";
-        hudEl.innerHTML =
-          '<div class="wmp-hud-top">' +
-          '<div class="wmp-studio-bar">' +
-          '<div class="wmp-model-group">' +
-          '<button type="button" class="wmp-model-btn" data-model="tunnel">XP Tunnel</button>' +
-          '<button type="button" class="wmp-model-btn" data-model="spiral">Spiral Vortex</button>' +
-          '<button type="button" class="wmp-model-btn" data-model="starburst">WMC Starburst</button>' +
-          '<button type="button" class="wmp-model-btn" data-model="scope">Scope & Bars</button>' +
-          '<button type="button" class="wmp-model-btn" data-model="cyber">Cyber Orb</button>' +
-          "</div>" +
-          '<div class="wmp-divider"></div>' +
-          '<div class="wmp-color-controls">' +
-          '<canvas id="wmp-color-wheel-canvas" width="32" height="32" title="Drag on RGB Color Wheel to select custom color"></canvas>' +
-          '<label class="wmp-rot-label" title="Automatically rotate colors across the RGB spectrum">' +
-          '<input type="checkbox" id="wmp-rgb-rot-checkbox" />' +
-          "<span>RGB Rotation</span>" +
-          "</label>" +
-          "</div>" +
-          "</div>" +
-          '<div class="wmp-hud-actions">' +
-          '<button class="wmp-hud-fullscreen" id="wmp-hud-fullscreen-btn" type="button" title="Toggle Fullscreen Visualizer (F11 / Esc)">' +
-          '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
-          '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>' +
-          "</svg>" +
-          "<span>Fullscreen</span>" +
-          "</button>" +
-          '<button class="wmp-hud-close" type="button">Exit Surface</button>' +
-          "</div>" +
-          "</div>" +
-          '<div class="wmp-hud-bottom">' +
-          "<div>" +
-          '<div class="wmp-hud-title" id="wmp-hud-track-title">Spotify Velvet Red</div>' +
-          '<div class="wmp-hud-artist" id="wmp-hud-track-artist">Playing Audio Stream</div>' +
-          "</div>" +
-          "</div>";
-        document.body.appendChild(hudEl);
-
-        var modelBtns = hudEl.querySelectorAll(".wmp-model-btn");
-        for (var m = 0; m < modelBtns.length; m++) {
-          (function (btn) {
-            var mName = btn.getAttribute("data-model");
-            if (mName === settings.model) btn.classList.add("active");
-            btn.addEventListener("click", function () {
-              settings.model = mName;
-              saveSettings();
-              for (var k = 0; k < modelBtns.length; k++) {
-                modelBtns[k].classList.toggle("active", modelBtns[k] === btn);
-              }
-              if (ctx && backCtx) {
-                ctx.fillStyle = "#010203";
-                ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-                backCtx.fillStyle = "#010203";
-                backCtx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-              }
-            });
-          })(modelBtns[m]);
-        }
-
-        wheelCanvas = document.getElementById("wmp-color-wheel-canvas");
-        if (wheelCanvas) {
-          wheelCtx = wheelCanvas.getContext("2d");
-          var draggingWheel = false;
-          wheelCanvas.addEventListener("mousedown", function (e) {
-            draggingWheel = true;
-            pickColorFromWheelEvent(e);
-          });
-          window.addEventListener("mousemove", function (e) {
-            if (draggingWheel) pickColorFromWheelEvent(e);
-          });
-          window.addEventListener("mouseup", function () {
-            draggingWheel = false;
-          });
-          drawColorWheelWidget();
-        }
-
-        var rotCb = document.getElementById("wmp-rgb-rot-checkbox");
-        if (rotCb) {
-          rotCb.checked = settings.rgbRotation;
-          rotCb.addEventListener("change", function () {
-            settings.rgbRotation = !!rotCb.checked;
-            if (!settings.rgbRotation) {
-              currentHue = settings.customHue;
-              targetHue = settings.customHue;
-            }
-            saveSettings();
-            drawColorWheelWidget();
-          });
-        }
-
-        var fsBtn = document.getElementById("wmp-hud-fullscreen-btn");
-        if (fsBtn) {
-          fsBtn.addEventListener("click", function () {
-            setFullscreenMode(!fullscreenMode);
-          });
-        }
-
-        var closeBtn = hudEl.querySelector(".wmp-hud-close");
-        if (closeBtn) {
-          closeBtn.addEventListener("click", function () {
-            setFullscreenMode(false);
-            setSurfaceMode(false);
-          });
-        }
-      }
-  }
-
-  function updateLyricsToggleUI() {
-    if (!lyricsToggleBtn) return;
-    if (settings.lyricsVizOn) {
-      lyricsToggleBtn.classList.remove("off");
-      lyricsToggleBtn.innerHTML = '<span class="viz-dot"></span><span>Visualizer: ON</span>';
-    } else {
-      lyricsToggleBtn.classList.add("off");
-      lyricsToggleBtn.innerHTML = '<span class="viz-dot"></span><span>Visualizer: OFF</span>';
+  function setTextSafe(el, text) {
+    if (el && el.textContent !== text) {
+      el.textContent = text;
     }
   }
 
-  function updateHudInfo() {
-    if (!hudEl) return;
-    var tEl = document.getElementById("wmp-hud-track-title");
-    var aEl = document.getElementById("wmp-hud-track-artist");
-    if (tEl) tEl.textContent = currentTrackTitle || "Spotify Velvet Red";
-    if (aEl) aEl.textContent = currentTrackArtist || "";
+  function setStyleSafe(el, prop, value) {
+    if (el && el.style[prop] !== value) {
+      el.style[prop] = value;
+    }
   }
 
-  function ensurePlayerBarButton() {
-    if (surfaceBtn && surfaceBtn.isConnected) return;
-    var lyricsBtn = document.querySelector('[data-testid="lyrics-button"]');
-    var container = lyricsBtn ? lyricsBtn.parentElement : document.querySelector(".mwpJrmCgLlVkJVtWjlI1, .main-nowPlayingBar-extraControls");
-    if (!container) return;
+  function toggleClassSafe(el, cls, force) {
+    if (el && el.classList.contains(cls) !== !!force) {
+      el.classList.toggle(cls, !!force);
+    }
+  }
 
-    surfaceBtn = document.createElement("button");
-    surfaceBtn.id = "wmp-visualizer-surface-btn";
-    surfaceBtn.type = "button";
-    surfaceBtn.title = "Open Visualizer Studio Surface";
-    surfaceBtn.setAttribute("aria-label", "Open Visualizer Studio Surface");
-    surfaceBtn.innerHTML =
-      '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">' +
-      '<circle cx="8" cy="8" r="6.5" stroke-opacity="0.85"/>' +
-      '<ellipse cx="8" cy="8" rx="4.2" ry="3.2" transform="rotate(-24 8 8)" stroke-opacity="0.9"/>' +
-      '<circle cx="8" cy="8" r="1.6" fill="currentColor"/>' +
+  function updateAudioStatusPill() {
+    if (!bpmLabelEl) return;
+    const srcTag = features.sourceMode === "full-hd" || features.sourceMode === "3-band" ? "3-Band" : features.sourceMode === "loudness" ? "Loudness" : "Auto";
+    setTextSafe(bpmLabelEl, `${Math.round(features.bpm || 120)} BPM · ${srcTag}`);
+  }
+
+  function updateFooterMeta() {
+    setTextSafe(titleEl, playback.title || "Spotify Velvet Red");
+    setTextSafe(artistEl, playback.artist || (playback.isPaused ? "Paused" : "Playing"));
+    updateAudioStatusPill();
+  }
+
+  function updateVisibilityAndLayout() {
+    const lyricsRoute = isOnLyricsRoute();
+    const pathChanged = location.pathname !== runtime.lastPath;
+    if (runtime.surfaceMode && ((lyricsRoute && !runtime.wasLyricsRoute) || (pathChanged && location.pathname.includes("/lyrics")))) {
+      runtime.surfaceMode = false;
+    }
+    runtime.lastPath = location.pathname;
+    runtime.wasLyricsRoute = lyricsRoute;
+    runtime.onLyricsRoute = lyricsRoute;
+
+    const showLyricsViz = !runtime.surfaceMode && lyricsRoute && config.lyricsEnabled;
+    runtime.visualActive = runtime.surfaceMode || showLyricsViz;
+
+    toggleClassSafe(document.documentElement, "wmp-lyrics-viz-active", showLyricsViz);
+    toggleClassSafe(document.documentElement, "wmp-surface-active", runtime.surfaceMode);
+
+    const mainView = getMainViewContainer();
+    if (mainView) {
+      if (runtime.surfaceMode) {
+        setStyleSafe(mainView, "overflow", "hidden");
+      } else if (mainView.style.overflow === "hidden") {
+        setStyleSafe(mainView, "overflow", "");
+      }
+    }
+
+    const rect = getHostContainerRect();
+    if (hudRoot) {
+      const showHud = runtime.surfaceMode || lyricsRoute;
+      setStyleSafe(hudRoot, "display", showHud ? "block" : "none");
+      if (showHud) {
+        setStyleSafe(hudRoot, "left", `${Math.round(rect.left + 16)}px`);
+        setStyleSafe(hudRoot, "top", `${Math.round(rect.top + 14)}px`);
+        setStyleSafe(hudRoot, "width", `${Math.max(260, Math.round(rect.width - 34))}px`);
+        setStyleSafe(hudRoot, "height", `${Math.max(120, Math.round(rect.height - 28))}px`);
+        setStyleSafe(hudRoot, "zIndex", runtime.surfaceMode ? "65" : "55");
+      }
+    }
+
+    const leftCluster = document.getElementById("wmp-hud-left-cluster");
+    const lyricsToggle = document.getElementById("wmp-lyrics-viz-toggle");
+    const fullBtn = document.getElementById("wmp-fullscreen-btn");
+    const exitBtn = document.getElementById("wmp-surface-exit-btn");
+    const footer = document.getElementById("wmp-hud-track-footer");
+
+    setStyleSafe(leftCluster, "display", runtime.visualActive ? "inline-flex" : "none");
+    setStyleSafe(fullBtn, "display", runtime.visualActive ? "inline-flex" : "none");
+    setStyleSafe(exitBtn, "display", runtime.surfaceMode ? "inline-flex" : "none");
+    setStyleSafe(footer, "display", runtime.surfaceMode ? "flex" : "none");
+
+    if (lyricsToggle) {
+      setStyleSafe(lyricsToggle, "display", !runtime.surfaceMode && lyricsRoute ? "inline-flex" : "none");
+      toggleClassSafe(lyricsToggle, "is-on", config.lyricsEnabled);
+      const txt = lyricsToggle.querySelector("span");
+      setTextSafe(txt, config.lyricsEnabled ? "Visualizer: ON" : "Visualizer: OFF");
+    }
+
+    const surfaceBtn = document.getElementById("wmp-visualizer-surface-btn");
+    toggleClassSafe(surfaceBtn, "active", runtime.surfaceMode);
+
+    ensureRenderLoopState();
+  }
+
+  function toggleFullscreen() {
+    const next = !runtime.isFullscreen;
+    runtime.isFullscreen = next;
+    if (next) {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } else if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+    const fullBtn = document.getElementById("wmp-fullscreen-btn");
+    setTextSafe(fullBtn, next ? "Exit Fullscreen" : "Fullscreen");
+    updateVisibilityAndLayout();
+  }
+
+  function createSurfacePlayerButton() {
+    if (document.getElementById("wmp-visualizer-surface-btn")) return;
+
+    const btn = document.createElement("button");
+    btn.id = "wmp-visualizer-surface-btn";
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Toggle WMP Visualizer Surface");
+    btn.title = "WMP Visualizer Studio (Alt+V)";
+    btn.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' +
+      '<rect x="1" y="9" width="2.2" height="5.5" rx="0.8"/>' +
+      '<rect x="4.8" y="4.5" width="2.2" height="10" rx="0.8"/>' +
+      '<rect x="8.6" y="1.5" width="2.2" height="13" rx="0.8"/>' +
+      '<rect x="12.4" y="6.5" width="2.2" height="8" rx="0.8"/>' +
       "</svg>";
 
-    surfaceBtn.addEventListener("click", function () {
-      setSurfaceMode(!surfaceMode);
+    btn.addEventListener("click", () => {
+      runtime.surfaceMode = !runtime.surfaceMode;
+      if (!runtime.surfaceMode && runtime.isFullscreen) {
+        toggleFullscreen();
+      }
+      updateVisibilityAndLayout();
     });
 
-    if (lyricsBtn && !lyricsBtn.__wmpHooked) {
-      lyricsBtn.__wmpHooked = true;
-      lyricsBtn.addEventListener("click", function () {
-        if (surfaceMode) {
-          setSurfaceMode(false);
-        }
+    const lyricsWrap = document.querySelector(".NmfW_y2jYByYTRtCmPaB");
+    if (lyricsWrap && lyricsWrap.parentElement) {
+      lyricsWrap.parentElement.insertBefore(btn, lyricsWrap);
+      return;
+    }
+
+    const lyricsBtn = document.querySelector('button[data-testid="lyrics-button"]');
+    if (lyricsBtn && lyricsBtn.parentElement) {
+      lyricsBtn.parentElement.insertBefore(btn, lyricsBtn);
+      return;
+    }
+
+    const extraBar = document.querySelector(".vQrn40NmmpeUfmOfgxeo");
+    if (extraBar) {
+      extraBar.prepend(btn);
+    }
+  }
+
+  function buildUi() {
+    if (document.getElementById("spotify-lyrics-visualizer")) return;
+
+    canvas = document.createElement("canvas");
+    canvas.id = "spotify-lyrics-visualizer";
+    canvas.setAttribute("aria-hidden", "true");
+    document.body.appendChild(canvas);
+    ctx = canvas.getContext("2d", { alpha: false });
+
+    fbCanvas = document.createElement("canvas");
+    fbCtx = fbCanvas.getContext("2d", { alpha: false });
+
+    hudRoot = document.createElement("div");
+    hudRoot.id = "wmp-visualizer-surface-hud";
+
+    const topBar = document.createElement("div");
+    topBar.id = "wmp-hud-topbar";
+
+    const leftCluster = document.createElement("div");
+    leftCluster.id = "wmp-hud-left-cluster";
+
+    const panel = document.createElement("div");
+    panel.id = "wmp-hud-panel";
+
+    const modelsWrap = document.createElement("div");
+    modelsWrap.id = "wmp-hud-models";
+
+    MODELS.forEach((m) => {
+      const mb = document.createElement("button");
+      mb.type = "button";
+      mb.className = "wmp-model-btn" + (config.model === m.id ? " active" : "");
+      mb.textContent = m.label;
+      mb.dataset.modelId = m.id;
+      mb.addEventListener("click", () => {
+        config.model = m.id;
+        writeStore(STORE_KEYS.model, m.id);
+        modelsWrap.querySelectorAll(".wmp-model-btn").forEach((el) => {
+          el.classList.toggle("active", el.dataset.modelId === m.id);
+        });
       });
-    }
+      modelsWrap.appendChild(mb);
+    });
 
-    if (lyricsBtn && lyricsBtn.nextSibling) {
-      container.insertBefore(surfaceBtn, lyricsBtn.nextSibling);
-    } else {
-      container.appendChild(surfaceBtn);
-    }
-  }
+    const sep = document.createElement("div");
+    sep.id = "wmp-hud-sep";
 
-  function setSurfaceMode(enabled) {
-    surfaceMode = !!enabled;
-    if (!surfaceMode && fullscreenMode) {
-      setFullscreenMode(false);
-      return;
-    }
-    if (surfaceBtn) {
-      if (surfaceMode) surfaceBtn.classList.add("active");
-      else surfaceBtn.classList.remove("active");
-    }
-    rectDirty = true;
-    evaluateVisibilityAndLifecycle();
-  }
+    const colorsWrap = document.createElement("div");
+    colorsWrap.id = "wmp-hud-colors";
 
-  function updateFullscreenBtnUI() {
-    var fsBtn = document.getElementById("wmp-hud-fullscreen-btn");
-    if (!fsBtn) return;
-    if (fullscreenMode) {
-      fsBtn.innerHTML =
-        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
-        '<path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4"/>' +
-        "</svg>" +
-        "<span>Exit Fullscreen</span>";
-    } else {
-      fsBtn.innerHTML =
-        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">' +
-        '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>' +
-        "</svg>" +
-        "<span>Fullscreen</span>";
-    }
-  }
+    const wheelWrap = document.createElement("div");
+    wheelWrap.id = "wmp-color-wheel-wrap";
+    wheelWrap.title = "Pick Visualizer Color";
 
-  function setFullscreenMode(enabled) {
-    fullscreenMode = !!enabled;
-    if (fullscreenMode) {
-      surfaceMode = true;
-      if (surfaceBtn) surfaceBtn.classList.add("active");
-      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(function () {});
+    wheelCanvas = document.createElement("canvas");
+    wheelCanvas.id = "wmp-color-wheel-canvas";
+    wheelCanvas.width = 28;
+    wheelCanvas.height = 28;
+
+    wheelMarker = document.createElement("div");
+    wheelMarker.id = "wmp-color-wheel-marker";
+
+    let draggingWheel = false;
+    wheelWrap.addEventListener("pointerdown", (e) => {
+      draggingWheel = true;
+      wheelWrap.setPointerCapture(e.pointerId);
+      pickColorFromWheelEvent(e);
+    });
+    wheelWrap.addEventListener("pointermove", (e) => {
+      if (draggingWheel) pickColorFromWheelEvent(e);
+    });
+    wheelWrap.addEventListener("pointerup", (e) => {
+      draggingWheel = false;
+      try { wheelWrap.releasePointerCapture(e.pointerId); } catch {}
+    });
+
+    wheelWrap.appendChild(wheelCanvas);
+    wheelWrap.appendChild(wheelMarker);
+
+    const rgbLabel = document.createElement("label");
+    rgbLabel.id = "wmp-rgb-rotate-label";
+    const rgbCb = document.createElement("input");
+    rgbCb.id = "wmp-rgb-rotate-checkbox";
+    rgbCb.type = "checkbox";
+    rgbCb.checked = config.rgbRotate;
+    rgbCb.addEventListener("change", () => {
+      config.rgbRotate = rgbCb.checked;
+      writeStore(STORE_KEYS.rgbRotate, config.rgbRotate ? "1" : "0");
+    });
+    const rgbText = document.createElement("span");
+    rgbText.textContent = "RGB Rotation";
+    rgbLabel.appendChild(rgbCb);
+    rgbLabel.appendChild(rgbText);
+
+    colorsWrap.appendChild(wheelWrap);
+    colorsWrap.appendChild(rgbLabel);
+
+    panel.appendChild(modelsWrap);
+    panel.appendChild(sep);
+    panel.appendChild(colorsWrap);
+
+    const audioPill = document.createElement("div");
+    audioPill.id = "wmp-hud-audio-pill";
+
+    beatLedEl = document.createElement("span");
+    beatLedEl.id = "wmp-beat-led";
+
+    bpmLabelEl = document.createElement("span");
+    bpmLabelEl.textContent = "120 BPM · Auto";
+
+    const sensSelect = document.createElement("select");
+    sensSelect.id = "wmp-sensitivity-select";
+    sensSelect.title = "Beat Reactivity Intensity";
+    [
+      { val: "subtle", label: "Subtle" },
+      { val: "balanced", label: "Balanced" },
+      { val: "overdrive", label: "Overdrive" }
+    ].forEach((opt) => {
+      const o = document.createElement("option");
+      o.value = opt.val;
+      o.textContent = opt.label;
+      if (config.sensitivity === opt.val) o.selected = true;
+      sensSelect.appendChild(o);
+    });
+    sensSelect.addEventListener("change", () => {
+      config.sensitivity = sensSelect.value;
+      writeStore(STORE_KEYS.sensitivity, config.sensitivity);
+    });
+
+    audioPill.appendChild(beatLedEl);
+    audioPill.appendChild(bpmLabelEl);
+    audioPill.appendChild(sensSelect);
+
+    leftCluster.appendChild(panel);
+    leftCluster.appendChild(audioPill);
+
+    const rightCluster = document.createElement("div");
+    rightCluster.id = "wmp-hud-right-cluster";
+
+    const lyricsToggle = document.createElement("button");
+    lyricsToggle.id = "wmp-lyrics-viz-toggle";
+    lyricsToggle.type = "button";
+    const toggleDot = document.createElement("i");
+    toggleDot.id = "wmp-lyrics-viz-toggle-dot";
+    const toggleSpan = document.createElement("span");
+    toggleSpan.textContent = config.lyricsEnabled ? "Visualizer: ON" : "Visualizer: OFF";
+    lyricsToggle.appendChild(toggleDot);
+    lyricsToggle.appendChild(toggleSpan);
+    lyricsToggle.addEventListener("click", () => {
+      config.lyricsEnabled = !config.lyricsEnabled;
+      writeStore(STORE_KEYS.lyricsEnabled, config.lyricsEnabled ? "1" : "0");
+      if (!config.lyricsEnabled && runtime.isFullscreen) {
+        toggleFullscreen();
       }
-    } else {
-      if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(function () {});
-      }
-    }
-    updateFullscreenBtnUI();
-    rectDirty = true;
-    evaluateVisibilityAndLifecycle();
+      updateVisibilityAndLayout();
+    });
+
+    const fullBtn = document.createElement("button");
+    fullBtn.id = "wmp-fullscreen-btn";
+    fullBtn.type = "button";
+    fullBtn.className = "wmp-action-btn";
+    fullBtn.textContent = "Fullscreen";
+    fullBtn.addEventListener("click", toggleFullscreen);
+
+    const exitBtn = document.createElement("button");
+    exitBtn.id = "wmp-surface-exit-btn";
+    exitBtn.type = "button";
+    exitBtn.className = "wmp-action-btn";
+    exitBtn.textContent = "Exit Surface";
+    exitBtn.addEventListener("click", () => {
+      runtime.surfaceMode = false;
+      if (runtime.isFullscreen) toggleFullscreen();
+      updateVisibilityAndLayout();
+    });
+
+    rightCluster.appendChild(lyricsToggle);
+    rightCluster.appendChild(fullBtn);
+    rightCluster.appendChild(exitBtn);
+
+    topBar.appendChild(leftCluster);
+    topBar.appendChild(rightCluster);
+
+    const footer = document.createElement("div");
+    footer.id = "wmp-hud-track-footer";
+    titleEl = document.createElement("div");
+    titleEl.id = "wmp-hud-track-title";
+    artistEl = document.createElement("div");
+    artistEl.id = "wmp-hud-track-artist";
+    footer.appendChild(titleEl);
+    footer.appendChild(artistEl);
+
+    hudRoot.appendChild(topBar);
+    hudRoot.appendChild(footer);
+    document.body.appendChild(hudRoot);
+
+    drawColorWheel();
+    updateWheelMarker();
   }
 
-  function updateViewportBounds() {
-    if (!cachedViewportEl || !cachedViewportEl.isConnected || cachedViewportEl.clientHeight < 100) {
-      cachedViewportEl =
-        document.querySelector(".main-view-container") ||
-        document.querySelector(".Root__main-view") ||
-        document.querySelector("main");
-    }
-    if (cachedViewportEl) {
-      var r = cachedViewportEl.getBoundingClientRect();
-      if (r.width > 100 && r.height > 100 && r.left >= -10 && r.left < window.innerWidth) {
-        rectLeft = Math.round(r.left);
-        rectTop = Math.round(r.top);
-        rectWidth = Math.round(r.width);
-        rectHeight = Math.round(r.height);
+  function setupListeners() {
+    window.addEventListener("resize", updateVisibilityAndLayout);
+
+    document.addEventListener("fullscreenchange", () => {
+      const activeFs = !!document.fullscreenElement;
+      if (runtime.isFullscreen !== activeFs) {
+        runtime.isFullscreen = activeFs;
+        const fullBtn = document.getElementById("wmp-fullscreen-btn");
+        setTextSafe(fullBtn, activeFs ? "Exit Fullscreen" : "Fullscreen");
+        updateVisibilityAndLayout();
       }
-    }
-    rectDirty = false;
-  }
+    });
 
-  function isLyricsScreenOpen() {
-    var el = document.querySelector('.FUYNhisXTCmbzt9IDxnT, [data-testid="lyrics-page"], .Root__lyrics-cinema');
-    if (!el || !el.isConnected) return false;
-    var r = el.getBoundingClientRect();
-    return r.height > 80 && r.width > 80 && r.left >= -20 && r.left < window.innerWidth - 40;
-  }
+    document.addEventListener("visibilitychange", () => {
+      ensureRenderLoopState();
+    });
 
-  function evaluateVisibilityAndLifecycle() {
-    ensurePlayerBarButton();
-    var lyricsOpen = isLyricsScreenOpen();
-    wasLyricsOpen = lyricsOpen;
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target && e.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
 
-    ensureCanvasAndHud();
-    updateViewportBounds();
-
-    var showLyricsToggle = lyricsOpen && !surfaceMode && !fullscreenMode;
-    if (lyricsToggleBtn) {
-      if (showLyricsToggle) {
-        lyricsToggleBtn.classList.add("visible");
-        lyricsToggleBtn.style.top = rectTop + 18 + "px";
-        lyricsToggleBtn.style.left = rectLeft + rectWidth - 155 + "px";
-      } else {
-        lyricsToggleBtn.classList.remove("visible");
-      }
-    }
-
-    var shouldShow = surfaceMode || fullscreenMode || (lyricsOpen && settings.lyricsVizOn);
-
-    if (!shouldShow) {
-      if (isRunning) {
-        isRunning = false;
-        if (rafId) {
-          clearTimeout(rafId);
-          rafId = 0;
+      if (e.altKey && (e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        runtime.surfaceMode = !runtime.surfaceMode;
+        if (!runtime.surfaceMode && runtime.isFullscreen) toggleFullscreen();
+        updateVisibilityAndLayout();
+      } else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey && !e.metaKey && runtime.visualActive) {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if (e.key === "Escape" && (runtime.isFullscreen || runtime.surfaceMode)) {
+        if (runtime.isFullscreen) {
+          toggleFullscreen();
+        } else if (runtime.surfaceMode) {
+          runtime.surfaceMode = false;
+          updateVisibilityAndLayout();
         }
       }
-      if (canvas) {
-        canvas.style.display = "none";
-        canvas.classList.remove("surface-mode", "lyrics-mode", "fullscreen-mode");
+    });
+
+    let moRafQueued = false;
+    const isOwnNode = (n) => n === canvas || n === hudRoot || n === surfaceBtnRef;
+    let surfaceBtnRef = null;
+    const mo = new MutationObserver((mutations) => {
+      surfaceBtnRef = document.getElementById("wmp-visualizer-surface-btn");
+      let relevant = false;
+      for (let i = 0; i < mutations.length; i++) {
+        const m = mutations[i];
+        const t = m.target;
+        if ((hudRoot && hudRoot.contains(t)) || t === canvas || (surfaceBtnRef && surfaceBtnRef.contains(t))) {
+          continue;
+        }
+        const onlyOwnAdd = m.addedNodes.length > 0 && m.removedNodes.length === 0 && Array.from(m.addedNodes).every(isOwnNode);
+        const onlyOwnRem = m.removedNodes.length > 0 && m.addedNodes.length === 0 && Array.from(m.removedNodes).every(isOwnNode);
+        if (onlyOwnAdd || onlyOwnRem) continue;
+        relevant = true;
+        break;
       }
-      if (hudEl) {
-        hudEl.classList.remove("visible");
-      }
+      if (!relevant || moRafQueued) return;
+      moRafQueued = true;
+      requestAnimationFrame(() => {
+        moRafQueued = false;
+        createSurfacePlayerButton();
+        updateVisibilityAndLayout();
+      });
+    });
+
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function boot() {
+    if (!document.body) {
+      window.addEventListener("DOMContentLoaded", boot, { once: true });
       return;
     }
+    buildUi();
+    createSurfacePlayerButton();
+    setupListeners();
+    scanReactApis(true);
+    pollPlaybackClock();
+    updateVisibilityAndLayout();
 
-    canvas.style.display = "block";
-    canvas.style.left = "";
-    canvas.style.top = "";
-    canvas.style.width = "";
-    canvas.style.height = "";
-
-    var closeBtn = hudEl ? hudEl.querySelector(".wmp-hud-close") : null;
-    var bottomHud = hudEl ? hudEl.querySelector(".wmp-hud-bottom") : null;
-    var actionsGroup = hudEl ? hudEl.querySelector(".wmp-hud-actions") : null;
-
-    if (fullscreenMode) {
-      canvas.classList.remove("lyrics-mode", "surface-mode");
-      canvas.classList.add("fullscreen-mode");
-      if (hudEl) {
-        hudEl.classList.add("visible");
-        hudEl.style.left = "0px";
-        hudEl.style.top = "0px";
-        hudEl.style.width = "100vw";
-        hudEl.style.height = "100vh";
-        if (closeBtn) closeBtn.style.display = "inline-flex";
-        if (bottomHud) bottomHud.style.display = "flex";
-        if (actionsGroup) actionsGroup.style.marginRight = "0px";
-        updateHudInfo();
-      }
-    } else if (surfaceMode) {
-      canvas.classList.remove("lyrics-mode", "fullscreen-mode");
-      canvas.classList.add("surface-mode");
-      if (hudEl) {
-        hudEl.classList.add("visible");
-        hudEl.style.left = rectLeft + "px";
-        hudEl.style.top = rectTop + "px";
-        hudEl.style.width = rectWidth + "px";
-        hudEl.style.height = rectHeight + "px";
-        if (closeBtn) closeBtn.style.display = "inline-flex";
-        if (bottomHud) bottomHud.style.display = "flex";
-        if (actionsGroup) actionsGroup.style.marginRight = "0px";
-        updateHudInfo();
-      }
-    } else {
-      canvas.classList.remove("surface-mode", "fullscreen-mode");
-      canvas.classList.add("lyrics-mode");
-      if (hudEl) {
-        hudEl.classList.add("visible");
-        hudEl.style.left = rectLeft + "px";
-        hudEl.style.top = rectTop + "px";
-        hudEl.style.width = rectWidth + "px";
-        hudEl.style.height = rectHeight + "px";
-        if (closeBtn) closeBtn.style.display = "none";
-        if (bottomHud) bottomHud.style.display = "none";
-        if (actionsGroup) actionsGroup.style.marginRight = "146px";
-      }
-    }
-
-    if (!isRunning) {
-      isRunning = true;
-      lastFrameTime = performance.now();
-      rafId = setTimeout(renderLoop, FRAME_INTERVAL_PLAYING);
-    }
+    setInterval(() => {
+      createSurfacePlayerButton();
+      pollPlaybackClock();
+      updateVisibilityAndLayout();
+    }, 220);
   }
 
-  function renderTunnelModel(cx, cy, tx, ty, sat, totalActivity) {
-    backCtx.globalCompositeOperation = "source-over";
-    backCtx.globalAlpha = 1;
-    backCtx.drawImage(canvas, 0, 0);
-
-    var zoom = isMusicPlaying ? 1.036 + smoothBass * 0.052 + beatPulse * 0.048 + barShock * 0.036 : 1.008;
-    var rotStep = isMusicPlaying ? spiralDir * (0.004 + smoothMid * 0.011 + beatPulse * 0.016) : 0.0012;
-
-    var vanishX = tx + Math.sin(lastFrameTime * 0.00055) * 18;
-    var vanishY = ty + Math.cos(lastFrameTime * 0.00042) * 12;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = isMusicPlaying ? 0.945 : 0.89;
-    ctx.translate(vanishX, vanishY);
-    ctx.scale(zoom, zoom);
-    ctx.rotate(rotStep);
-    ctx.translate(-vanishX, -vanishY);
-    ctx.drawImage(backCanvas, 0, 0);
-    ctx.restore();
-
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = isMusicPlaying
-      ? "rgba(2, 4, 6, " + (0.048 - Math.min(0.018, smoothBass * 0.014)).toFixed(3) + ")"
-      : "rgba(2, 3, 5, 0.14)";
-    ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-
-    var baseR = Math.min(INTERNAL_W, INTERNAL_H) * (0.24 + smoothBass * 0.065 + beatPulse * 0.05);
-
-    var coreGrad = ctx.createRadialGradient(tx, ty, baseR * 0.08, tx, ty, baseR * 1.02);
-    coreGrad.addColorStop(0, "rgba(0, 0, 0, 0.98)");
-    coreGrad.addColorStop(0.62, "rgba(0, 0, 0, 0.86)");
-    coreGrad.addColorStop(0.86, "rgba(0, 0, 0, 0.25)");
-    coreGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = coreGrad;
-    ctx.beginPath();
-    ctx.arc(tx, ty, baseR * 1.02, 0, Math.PI * 2);
-    ctx.fill();
-
-    var tiltAspect = 0.86 + Math.sin(lastFrameTime * 0.0007) * 0.08;
-    var tiltAngle = Math.sin(lastFrameTime * 0.00045) * 0.38;
-    var cosTilt = Math.cos(tiltAngle);
-    var sinTilt = Math.sin(tiltAngle);
-
-    for (var s = 0; s < STRAND_COUNT; s++) {
-      var strandFrac = s / (STRAND_COUNT - 1);
-      var ringR = baseR * (0.84 + strandFrac * 0.24);
-      var strandHue = (currentHue + s * 5 - 12 + 360) % 360;
-      var strandPhase = tunnelPhase * (1.05 + (s % 3) * 0.32) + s * 2.094;
-      var strandSign = s % 2 === 0 ? 1 : -1;
-      var orbitX = tx + Math.cos(s * 1.35 + tunnelPhase * 0.35) * (4.5 + smoothBass * 7);
-      var orbitY = ty + Math.sin(s * 1.35 + tunnelPhase * 0.35) * (3.5 + smoothBass * 5.5);
-
-      for (var v = 0; v < VERTEX_COUNT; v++) {
-        var hIdx1 = (v + s * 7) % 24;
-        var hIdx2 = (v * 5 + s * 11) % 24;
-        var harmonicVal = waveHarmonics[hIdx1] * 0.78 + waveHarmonics[hIdx2] * 0.58;
-
-        var osc1 = Math.sin(v * (0.4188 + s * 0.052) + strandPhase * strandSign);
-        var osc2 = Math.cos(v * (1.1519 - (s % 2) * 0.21) - strandPhase * 1.35);
-        var osc3 = Math.sin(v * 2.513 + strandPhase * 2.15 + s * 1.7);
-        var waveDisp = (osc1 * 0.48 + osc2 * 0.35 + osc3 * 0.25 + harmonicVal * 1.32) * totalActivity * baseR * (0.21 + strandFrac * 0.11);
-
-        var r = ringR + waveDisp;
-        var lx = cosTable[v] * r;
-        var ly = sinTable[v] * r * tiltAspect;
-
-        vxBuf[v] = orbitX + (lx * cosTilt - ly * sinTilt);
-        vyBuf[v] = orbitY + (lx * sinTilt + ly * cosTilt);
-      }
-      vxBuf[VERTEX_COUNT] = vxBuf[0];
-      vyBuf[VERTEX_COUNT] = vyBuf[0];
-
-      ctx.beginPath();
-      var startMidX = (vxBuf[0] + vxBuf[VERTEX_COUNT - 1]) * 0.5;
-      var startMidY = (vyBuf[0] + vyBuf[VERTEX_COUNT - 1]) * 0.5;
-      ctx.moveTo(startMidX, startMidY);
-      for (var pIdx = 0; pIdx < VERTEX_COUNT; pIdx++) {
-        var nextIdx = pIdx + 1;
-        var midX = (vxBuf[pIdx] + vxBuf[nextIdx]) * 0.5;
-        var midY = (vyBuf[pIdx] + vyBuf[nextIdx]) * 0.5;
-        ctx.quadraticCurveTo(vxBuf[pIdx], vyBuf[pIdx], midX, midY);
-      }
-      ctx.closePath();
-
-      ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = "hsla(" + strandHue.toFixed(0) + ", " + sat + "%, 44%, " + (0.28 + Math.min(0.32, totalActivity * 0.22)).toFixed(2) + ")";
-      ctx.lineWidth = 2.6 - strandFrac * 0.5;
-      ctx.stroke();
-
-      ctx.strokeStyle = "hsla(" + strandHue.toFixed(0) + ", " + sat + "%, " + (78 + Math.min(18, beatPulse * 16)).toFixed(0) + "%, " + (0.84 - strandFrac * 0.1).toFixed(2) + ")";
-      ctx.lineWidth = 1.15;
-      ctx.stroke();
-    }
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderSpiralVortexModel(cx, cy, tx, ty, sat, totalActivity) {
-    backCtx.globalCompositeOperation = "source-over";
-    backCtx.globalAlpha = 1;
-    backCtx.drawImage(canvas, 0, 0);
-
-    var zoom = isMusicPlaying ? 1.028 + smoothBass * 0.045 + beatPulse * 0.04 : 1.005;
-    var rot = isMusicPlaying ? spiralDir * (0.014 + smoothBass * 0.025) : 0.003;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 0.9;
-    ctx.translate(tx, ty);
-    ctx.scale(zoom, zoom);
-    ctx.rotate(rot);
-    ctx.translate(-tx, -ty);
-    ctx.drawImage(backCanvas, 0, 0);
-    ctx.restore();
-
-    ctx.fillStyle = "rgba(2, 3, 6, 0.12)";
-    ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-
-    var maxR = Math.max(INTERNAL_W, INTERNAL_H) * 0.62;
-    var arms = 3;
-    var pointsPerArm = 110;
-    ctx.globalCompositeOperation = "lighter";
-
-    for (var a = 0; a < arms; a++) {
-      var armOffset = (a * Math.PI * 2) / arms + spiralAngle * 1.8;
-      var armHue = (currentHue + a * 28) % 360;
-
-      ctx.beginPath();
-      for (var i = 0; i < pointsPerArm; i++) {
-        var frac = i / (pointsPerArm - 1);
-        var baseRadius = 10 + Math.pow(frac, 1.35) * maxR;
-        var theta = armOffset + frac * Math.PI * 5.5 - tunnelPhase * 0.55;
-        var hVal = waveHarmonics[(i + a * 7) % 24];
-        var wave = (Math.sin(i * 0.65 - tunnelPhase * 1.8) * 0.6 + hVal * 1.4) * totalActivity * (8 + frac * 42);
-        var r = Math.max(4, baseRadius + wave);
-        var px = tx + Math.cos(theta) * r;
-        var py = ty + Math.sin(theta) * r * 0.88;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.strokeStyle = "hsla(" + armHue.toFixed(0) + ", " + sat + "%, 48%, 0.42)";
-      ctx.lineWidth = 3.2;
-      ctx.stroke();
-
-      ctx.strokeStyle = "hsla(" + armHue.toFixed(0) + ", " + sat + "%, 84%, 0.9)";
-      ctx.lineWidth = 1.25;
-      ctx.stroke();
-    }
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderStarburstModel(cx, cy, tx, ty, sat, totalActivity) {
-    backCtx.globalCompositeOperation = "source-over";
-    backCtx.globalAlpha = 1;
-    backCtx.drawImage(canvas, 0, 0);
-
-    var zoom = isMusicPlaying ? 1.045 + smoothBass * 0.06 + beatPulse * 0.05 : 1.008;
-    ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 0.92;
-    ctx.translate(cx, cy);
-    ctx.scale(zoom, zoom);
-    ctx.rotate(spiralDir * 0.004);
-    ctx.translate(-cx, -cy);
-    ctx.drawImage(backCanvas, 0, 0);
-    ctx.restore();
-
-    ctx.fillStyle = "rgba(2, 2, 5, 0.11)";
-    ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-
-    ctx.globalCompositeOperation = "lighter";
-    var rays = 72;
-    var innerR = 14 + smoothBass * 16;
-    for (var i = 0; i < rays; i++) {
-      var angle = (i / rays) * Math.PI * 2 + spiralAngle * 0.5;
-      var edgeAlign = Math.max(0, Math.cos(angle - edgeAngle));
-      var palpBoost = Math.pow(edgeAlign, 3) * (beatPulse * 1.4 + barShock * 1.2);
-      var hVal = Math.abs(waveHarmonics[i % 24]);
-      var len = (35 + (hVal * 95 + smoothBass * 65 + palpBoost * 110) * totalActivity);
-      var rayHue = (currentHue + edgeAlign * 38 + (i % 5) * 4) % 360;
-
-      var x1 = cx + Math.cos(angle) * innerR;
-      var y1 = cy + Math.sin(angle) * innerR;
-      var x2 = cx + Math.cos(angle) * (innerR + len);
-      var y2 = cy + Math.sin(angle) * (innerR + len);
-
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.strokeStyle = "hsla(" + rayHue.toFixed(0) + ", " + sat + "%, " + (68 + Math.min(24, palpBoost * 25)).toFixed(0) + "%, 0.78)";
-      ctx.lineWidth = 1.4 + palpBoost * 1.5;
-      ctx.stroke();
-    }
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderScopeAndBarsModel(cx, cy, sat, totalActivity) {
-    ctx.fillStyle = "rgba(3, 4, 8, 0.34)";
-    ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-
-    var nBars = 48;
-    var padX = 36;
-    var usableW = INTERNAL_W - padX * 2;
-    var slotW = usableW / nBars;
-    var barW = Math.max(3, slotW - 3);
-    var baselineY = INTERNAL_H - 30;
-    var maxBarH = INTERNAL_H * 0.48;
-
-    for (var b = 0; b < nBars; b++) {
-      var hIdx = b % 24;
-      var freqFrac = b / (nBars - 1);
-      var bassWeight = Math.max(0, 1 - freqFrac * 1.55);
-      var midWeight = Math.max(0, 1 - Math.abs(freqFrac - 0.48) * 2.4);
-      var highWeight = Math.max(0, (freqFrac - 0.35) * 1.55);
-
-      var oscA = Math.abs(Math.sin(b * 0.62 - tunnelPhase * 1.85 + Math.cos(b * 0.27 + tunnelPhase * 0.9)));
-      var oscB = Math.abs(Math.cos(b * 1.18 + tunnelPhase * 2.45));
-      var harm = Math.abs(waveHarmonics[hIdx]) * 1.65;
-
-      var bandEnergy =
-        bassWeight * (smoothBass * 0.62 + beatPulse * 0.58) +
-        midWeight * (smoothMid * 0.48 + harm * 0.42) +
-        highWeight * (smoothHigh * 0.52 + harm * 0.38);
-
-      var dynamicMod = Math.pow(oscA * 0.58 + oscB * 0.42, 1.8) + harm * 0.35;
-      var raw = bandEnergy * dynamicMod + beatPulse * bassWeight * 0.28 * oscA;
-      var targetH = isMusicPlaying ? Math.min(maxBarH, Math.max(4, raw * maxBarH * 0.88)) : 3;
-
-      if (targetH > barValues[b]) {
-        barValues[b] = barValues[b] * 0.32 + targetH * 0.68;
-      } else {
-        barValues[b] = Math.max(3, barValues[b] * 0.68 + targetH * 0.32);
-      }
-
-      if (barValues[b] >= barPeaks[b]) {
-        barPeaks[b] = barValues[b];
-      } else {
-        barPeaks[b] = Math.max(3, barPeaks[b] - 2.1);
-      }
-
-      var bx = padX + b * slotW;
-      var bh = Math.max(2, barValues[b]);
-      var bHue = (currentHue + freqFrac * 52) % 360;
-
-      var grad = ctx.createLinearGradient(0, baselineY - bh, 0, baselineY);
-      grad.addColorStop(0, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 74%, 0.96)");
-      grad.addColorStop(0.55, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 52%, 0.88)");
-      grad.addColorStop(1, "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 28%, 0.75)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(bx, baselineY - bh, barW, bh);
-
-      ctx.fillStyle = "hsla(" + bHue.toFixed(0) + ", " + sat + "%, 90%, 0.98)";
-      ctx.fillRect(bx, baselineY - barPeaks[b] - 3.5, barW, 2.2);
-    }
-
-    ctx.globalCompositeOperation = "lighter";
-    var waveY = INTERNAL_H * 0.28;
-    for (var ch = 0; ch < 2; ch++) {
-      var chHue = (currentHue + ch * 26) % 360;
-      ctx.beginPath();
-      for (var i = 0; i <= VERTEX_COUNT; i++) {
-        var x = (i / VERTEX_COUNT) * INTERNAL_W;
-        var hVal = waveHarmonics[(i + ch * 7) % 24];
-        var env = Math.sin((i / VERTEX_COUNT) * Math.PI);
-        var dy =
-          (Math.sin(i * 0.38 + tunnelPhase * (ch === 0 ? 1.55 : -1.35)) * 0.58 +
-            Math.cos(i * 1.15 - tunnelPhase * 2.25) * 0.38 +
-            hVal * 1.45) *
-          totalActivity *
-          env *
-          72;
-        var y = waveY + dy;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = "hsla(" + chHue.toFixed(0) + ", " + sat + "%, 50%, 0.45)";
-      ctx.lineWidth = 3.2;
-      ctx.stroke();
-
-      ctx.strokeStyle = "hsla(" + chHue.toFixed(0) + ", " + sat + "%, 86%, 0.92)";
-      ctx.lineWidth = 1.25;
-      ctx.stroke();
-    }
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderCyberOrbModel(cx, cy, sat, totalActivity) {
-    ctx.fillStyle = "rgba(3, 3, 8, 0.28)";
-    ctx.fillRect(0, 0, INTERNAL_W, INTERNAL_H);
-
-    var horizonY = INTERNAL_H * 0.58;
-    gridOffset = (gridOffset + (isMusicPlaying ? 0.035 + smoothBass * 0.08 : 0.005)) % 1;
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.strokeStyle = "hsla(" + currentHue.toFixed(0) + ", " + sat + "%, 48%, 0.38)";
-    ctx.lineWidth = 1;
-
-    for (var gx = -10; gx <= 10; gx++) {
-      ctx.beginPath();
-      ctx.moveTo(cx + gx * 12, horizonY);
-      ctx.lineTo(cx + gx * 95, INTERNAL_H);
-      ctx.stroke();
-    }
-
-    for (var gz = 0; gz < 10; gz++) {
-      var zFrac = (gz + gridOffset) / 10;
-      var py = horizonY + Math.pow(zFrac, 1.8) * (INTERNAL_H - horizonY);
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(INTERNAL_W, py);
-      ctx.stroke();
-    }
-
-    var orbY = horizonY - 46 - smoothBass * 14;
-    var orbR = 44 + smoothBass * 22 + beatPulse * 18;
-    for (var ring = 0; ring < 4; ring++) {
-      var rHue = (currentHue + ring * 15) % 360;
-      ctx.beginPath();
-      for (var v = 0; v <= VERTEX_COUNT; v++) {
-        var idx = v % VERTEX_COUNT;
-        var hVal = waveHarmonics[(idx + ring * 5) % 24];
-        var spike = (Math.sin(idx * 0.52 + tunnelPhase * 1.5 + ring) * 0.5 + hVal * 1.35) * totalActivity * 26;
-        var rr = orbR * (0.72 + ring * 0.12) + spike;
-        var px = cx + cosTable[idx] * rr;
-        var py2 = orbY + sinTable[idx] * rr;
-        if (v === 0) ctx.moveTo(px, py2);
-        else ctx.lineTo(px, py2);
-      }
-      ctx.strokeStyle = "hsla(" + rHue.toFixed(0) + ", " + sat + "%, 78%, " + (0.85 - ring * 0.14).toFixed(2) + ")";
-      ctx.lineWidth = 1.4 - ring * 0.2;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  function renderLoop() {
-    if (!isRunning) return;
-    var nowMs = performance.now();
-    var dt = Math.min(0.1, Math.max(0.01, (nowMs - (lastFrameTime || nowMs)) * 0.001));
-    lastFrameTime = nowMs;
-
-    var nextDelay = isMusicPlaying ? FRAME_INTERVAL_PLAYING : FRAME_INTERVAL_PAUSED;
-    rafId = setTimeout(renderLoop, nextDelay);
-
-    if (rectDirty) {
-      updateViewportBounds();
-      if (hudEl && surfaceMode && !fullscreenMode) {
-        hudEl.style.left = rectLeft + "px";
-        hudEl.style.top = rectTop + "px";
-        hudEl.style.width = rectWidth + "px";
-        hudEl.style.height = rectHeight + "px";
-      }
-    }
-
-    updateAudioTelemetry(nowMs);
-
-    if (settings.rgbRotation) {
-      var hueDiff = targetHue - currentHue;
-      if (hueDiff > 180) hueDiff -= 360;
-      if (hueDiff < -180) hueDiff += 360;
-      currentHue = (currentHue + hueDiff * 0.045 + (isMusicPlaying ? dt * 14 : dt * 2) + 360) % 360;
-      if (surfaceMode && Math.random() < 0.15) drawColorWheelWidget();
-    } else {
-      currentHue = settings.customHue;
-    }
-
-    var sat = settings.rgbRotation ? 94 : settings.customSat;
-    var cx = INTERNAL_W * 0.5;
-    var cy = INTERNAL_H * 0.5;
-
-    throatOffsetX *= 0.9;
-    throatOffsetY *= 0.9;
-    var swayX = isMusicPlaying ? Math.sin(nowMs * 0.0011) * (10 + smoothBass * 16) + throatOffsetX : 0;
-    var swayY = isMusicPlaying ? Math.cos(nowMs * 0.00085) * (7 + smoothBass * 12) + throatOffsetY : 0;
-    var tx = cx + swayX;
-    var ty = cy + swayY;
-
-    var rotStep = isMusicPlaying ? spiralDir * (0.004 + smoothMid * 0.011 + beatPulse * 0.016) : 0.0012;
-    spiralAngle += rotStep;
-    tunnelPhase += isMusicPlaying ? dt * (4.2 + smoothBass * 10.5 + beatPulse * 9) : dt * 0.35;
-
-    var totalActivity = isMusicPlaying ? smoothBass * 0.88 + beatPulse * 0.98 + smoothHigh * 0.48 : 0.018;
-
-    if (settings.model === "spiral") {
-      renderSpiralVortexModel(cx, cy, tx, ty, sat, totalActivity);
-    } else if (settings.model === "starburst") {
-      renderStarburstModel(cx, cy, tx, ty, sat, totalActivity);
-    } else if (settings.model === "scope") {
-      renderScopeAndBarsModel(cx, cy, sat, totalActivity);
-    } else if (settings.model === "cyber") {
-      renderCyberOrbModel(cx, cy, sat, totalActivity);
-    } else {
-      renderTunnelModel(cx, cy, tx, ty, sat, totalActivity);
-    }
-  }
-
-  window.addEventListener(
-    "resize",
-    function () {
-      rectDirty = true;
-    },
-    { passive: true }
-  );
-
-  window.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && fullscreenMode) {
-      setFullscreenMode(false);
-    } else if (e.key === "F11" && surfaceMode) {
-      e.preventDefault();
-      setFullscreenMode(!fullscreenMode);
-    }
-  });
-
-  document.addEventListener("fullscreenchange", function () {
-    if (!document.fullscreenElement && fullscreenMode) {
-      fullscreenMode = false;
-      updateFullscreenBtnUI();
-      rectDirty = true;
-      evaluateVisibilityAndLifecycle();
-    }
-  });
-
-  setInterval(evaluateVisibilityAndLifecycle, 400);
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", evaluateVisibilityAndLifecycle);
-  } else {
-    evaluateVisibilityAndLifecycle();
-  }
+  boot();
 })();

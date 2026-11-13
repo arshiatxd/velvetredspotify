@@ -5,12 +5,13 @@
 <h1 align="center">🍷 Spotify Velvet Red Edition</h1>
 
 <p align="center">
-  <strong>An authentic Windows 7 Aero Glass & Windows Media Player 11 Velvet Red overhaul for Spotify Desktop.</strong><br>
-  Featuring a multi-model <strong>WMP Visualizer Studio</strong> (`XP Tunnel`, `Spiral Vortex`, `WMC Starburst`, `Scope & Bars`, `Cyber Orb`) with an interactive <strong>RGB Color Wheel + RGB Color Rotation</strong>, real-time bass & rhythm reactivity, a Lyrics-page Visualizer On/Off toggle, and centered 3D Glass Jewel transport controls.
+  <strong>An authentic Windows 7 Aero Glass & Windows Media Player 11 Velvet Red overhaul for Spotify Desktop (1.3.9.2055+).</strong><br>
+  Includes automatic <strong>SpotX</strong> pre-installation, a 5-model <strong>WMP Visualizer Studio</strong> (`XP Tunnel`, `Spiral Vortex`, `WMC Starburst`, `Scope & Bars`, `Cyber Orb`) powered by Spotify's native 3-band protobuf waveforms &amp; BPM telemetry, an interactive <strong>RGB Color Wheel + RGB Rotation</strong>, Lyrics-screen overlay toggle, and WMP 11 3D Glass Jewel transport controls.
 </p>
 
 <p align="center">
-  <a href="#-installation-guide"><img src="https://img.shields.io/badge/Installer-Ready-crimson.svg?style=flat-square" alt="Installer Ready" /></a>
+  <a href="#-installation-guide"><img src="https://img.shields.io/badge/Spotify-1.3.9.2055-crimson.svg?style=flat-square" alt="Spotify 1.3.9.2055" /></a>
+  <a href="#-installation-guide"><img src="https://img.shields.io/badge/Installer-SpotX%20%2B%20Velvet%20Red-darkred.svg?style=flat-square" alt="SpotX + Velvet Red" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-darkred.svg?style=flat-square" alt="License" /></a>
   <a href="https://github.com/arshiatxd/velvetredspotify"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg?style=flat-square" alt="Windows 10/11" /></a>
 </p>
@@ -47,18 +48,19 @@
     - **RGB Color Wheel Picker**: Click or drag anywhere on the 2D HSV/RGB color wheel in the Visualizer Surface Studio Bar to set a custom hue and saturation.
     - **RGB Color Rotation Checkbox**: Enable continuous rhythm-driven RGB hue rotation or uncheck to lock in your exact chosen color from the RGB wheel.
   - **Dual Viewing Modes + Fullscreen Option**:
-    1. **Lyrics Screen (with On/Off Toggle)**: Renders behind high-contrast Spotify lyrics (`z-index` layered so lyrics stay crisp and readable on top) and includes a floating **`Visualizer: ON / OFF`** button in the top-right corner of the Lyrics view.
-    2. **Dedicated Visualizer Surface Screen (+ Fullscreen Mode)**: Toggleable via the custom Vortex button in the bottom-right player bar (`Open Visualizer Studio Surface`) for an unobstructed studio view with model selector pills, RGB Color Wheel, RGB Rotation toggle, **`Fullscreen`** toggle (`F11` / `Esc`), and track HUD.
-  - **True Bass & Rhythm Reactivity**: Hooks into Spotify's internal `PlayerAPI` and `/audio-attributes/v1/audio-analysis/` telemetry (`segments`, `beats`, `bars`, `loudness_max`, `pitches`, and `timbre`). Quiet passages calm the ring; bass kicks and drops trigger multi-stranded oscilloscope waveform spikes and tunnel zoom surges. Pausing playback settles the visualizer into a calm idle state.
+    1. **Lyrics Screen (with On/Off Toggle)**: Renders directly behind Spotify lyrics (`z-index` layered so lyrics stay bright and legible above the animation) with a non-overlapping **`Visualizer: ON / OFF`** pill in the Lyrics top bar.
+    2. **Dedicated Visualizer Surface Screen (+ Fullscreen Mode)**: Toggle via the equalizer icon in the bottom-right player bar (or `Alt+V`) for an unobstructed canvas with model pills, RGB Color Wheel, RGB Rotation toggle, **`Sensitivity`** (`Subtle` / `Balanced` / `Overdrive`), live **BPM / 3-Band badge & Beat LED**, **`Fullscreen`** (`F` / `Esc`), and track HUD. Navigating to Lyrics automatically exits Surface Mode.
+  - **Native 3-Band Waveform & BPM Sync (`1.3.9.2055`)**: Decodes Spotify's protobuf `MetadataExtensions` (`THREEBAND_WAVEFORMS`, `AUDIO_ATTRIBUTES_V2`, `BEATS`, `LIST_TUNER_AUDIO_ANALYSIS`) alongside `PlayerAPI` and playback clock synchronization. Tempo and beat pulses start automatically on load without manual seekbar interaction.
 
-- **Ultra-Low RAM & Utility Optimization**:
-  - Fixed `600 × 375` internal canvas buffer (`< 900 KB` RAM) with GPU bilinear upscaling and crisp electric strand rendering.
-  - Pre-allocated `Float32Array` geometry and harmonic tables with **zero garbage collection allocations** inside the render loop.
-  - **0% Background CPU/GPU**: The rendering timer completely hibernates (`clearTimeout`) and unmounts when neither the Lyrics screen nor the Visualizer Surface screen is active (or when toggled OFF on the Lyrics page).
+- **SpotX-First Lightweight Single-File Installer**:
+  - Compact `~224 KB` standalone `.exe` that strips dead stock bundles, installs/updates **SpotX** first when missing or requested, and injects gzip-compressed Velvet Red assets in-place into `xpui.spa`.
+
+- **Ultra-Low RAM & Zero Background Overhead**:
+  - DPR-capped 2D Canvas buffers with pre-allocated `Float32Array` geometry and zero GC churn inside the render loop.
+  - Completely halts rendering (`cancelAnimationFrame`) and hides the canvas outside the Lyrics screen and Visualizer Surface screen (or when toggled `OFF`).
 
 - **Custom Multi-Resolution Application Icon**:
-  - High-fidelity Windows `.ico` containing 16x16, 24x24, 32x32, 48x48, 64x64, 128x128 (32-bit BGRA DIB + 1-bit AND mask), and 256x256 (PNG).
-  - Bound to Desktop, Start Menu, and Taskbar shortcuts without modifying `Spotify.exe` (maintains digital signature verification).
+  - Multi-size Windows `.ico` bound directly to Desktop, Start Menu, and Taskbar shortcuts without altering `Spotify.exe` digital signatures.
 
 ---
 
@@ -84,63 +86,70 @@
 
 ## 🚀 Installation Guide
 
-> **⚠️ Important Prerequisite — Install Official Spotify Desktop First:**
-> `Spotify_VelvetRed_Setup.exe` (`~10 MB`) is a **UI & Visualizer Mod Installer** that patches Spotify's frontend package (`%APPDATA%\Spotify\Apps\xpui.spa`). It does **not** bundle the `180+ MB` proprietary Spotify audio engine.
-> - You must have the **official Windows Desktop version of Spotify** (downloaded from [spotify.com/download/windows](https://www.spotify.com/download/windows/), **not** the Microsoft Store version) installed on your PC before running this setup.
+> **Important Prerequisite — Install Official Spotify Desktop First:**
+> `Spotify_VelvetRed_Setup.exe` (`~224 KB`) runs **SpotX** and patches Spotify's frontend (`%APPDATA%\Spotify\Apps\xpui.spa`) in-place. It does **not** redistribute Spotify's desktop runtime binaries.
+> - Install the **official Windows Desktop version of Spotify** (`1.3.9.2055`, downloaded from [spotify.com/download/windows](https://www.spotify.com/download/windows/), not the Microsoft Store edition) before running setup.
 
 ---
 
 ### Step-by-Step Setup (Recommended)
 
 1. **Install Official Spotify (if not already installed)**:
-   - Download and install Spotify Desktop from [spotify.com/download/windows](https://www.spotify.com/download/windows/) and log into your account at least once so `%APPDATA%\Spotify\Apps\xpui.spa` is created.
+   - Download and install Spotify Desktop from [spotify.com/download/windows](https://www.spotify.com/download/windows/) and sign in once so `%APPDATA%\Spotify\Apps\xpui.spa` exists.
 2. **Download the Velvet Red Installer**:
-   - Download **[`Spotify_VelvetRed_Setup.exe`](Spotify_VelvetRed_Setup.exe)** from this repository (click on `Spotify_VelvetRed_Setup.exe` in the file list above, then click **Download raw file**).
+   - Download **[`Spotify_VelvetRed_Setup.exe`](Spotify_VelvetRed_Setup.exe)** from this repository (**Download raw file**).
 3. **Run `Spotify_VelvetRed_Setup.exe`**:
-   - Double-click `Spotify_VelvetRed_Setup.exe`. *(If Windows SmartScreen appears because the `.exe` is self-compiled, click **More info** → **Run anyway**).*
-4. **Click `Install & Launch Spotify`**:
-   - The installer will automatically:
-     1. Close any running Spotify processes.
-     2. Back up your original `xpui.spa` to `%APPDATA%\Spotify\Apps\xpui.spa.bak`.
-     3. Install the **Velvet Red Aero Glass theme** and **5-Model WMP Visualizer Studio**.
-     4. Apply the custom Velvet Red `.ico` icon to your Desktop, Start Menu, and Taskbar shortcuts and refresh the Windows icon cache.
-     5. Relaunch Spotify automatically.
+   - Double-click `Spotify_VelvetRed_Setup.exe`. *(If Windows SmartScreen prompts for an unsigned executable, click **More info** → **Run anyway**).*
+4. **Install SpotX + Velvet Red**:
+   - Keep **Install / Update SpotX first** checked and click **`Install & Launch Spotify`**.
+   - The installer automatically closes Spotify, runs SpotX safely (`podcasts_on`, `block_update_on`, `new_theme`), injects `/velvet-red.css` and `/lyrics-visualizer.js` into `xpui.spa`, installs `velvet_red.ico` on shortcuts, clears stale CEF cache, and launches Spotify.
 
-*Silent / unattended installation is also supported via PowerShell or Command Prompt:*
+*Silent / unattended CLI switches are supported via PowerShell or Command Prompt:*
 ```cmd
 Spotify_VelvetRed_Setup.exe /S
+Spotify_VelvetRed_Setup.exe /S /SPOTX
+Spotify_VelvetRed_Setup.exe /S /RESTORE
 ```
+*(Optional `/START` flag relaunches Spotify automatically after a silent `/S` install.)*
 
 ---
 
 ### 🎮 How to Use the Visualizer Studio
 
 - **Dedicated Visualizer Surface Screen**:
-  - Click the **Vortex icon** (`◎`) in the bottom-right player bar (right next to the Lyrics microphone icon) to open the full Visualizer Studio Surface.
-  - Use the top **Customization Bar** to switch between **`XP Tunnel`**, **`Spiral Vortex`**, **`WMC Starburst`**, **`Scope & Bars`**, and **`Cyber Orb`**.
-  - Drag anywhere on the **RGB Color Wheel** to pick a custom color, or check **`RGB Rotation`** to let the colors cycle automatically with the music rhythm.
-  - Click **`Fullscreen`** (or press `F11`) for a 100% full-monitor visualizer experience (`Esc` to exit).
+  - Click the **Equalizer icon** in the bottom-right player bar (left of Lyrics) or press **`Alt+V`** to open the Visualizer Studio Surface.
+  - Switch between **`XP Tunnel`**, **`Spiral Vortex`**, **`WMC Starburst`**, **`Scope & Bars`**, and **`Cyber Orb`**.
+  - Drag the **RGB Color Wheel** to set hue/saturation, toggle **`RGB Rotation`**, and choose **`Subtle`**, **`Balanced`**, or **`Overdrive`** sensitivity.
+  - Click **`Fullscreen`** (or press **`F`**; **`Esc`** exits).
 - **Lyrics Screen Visualizer (On/Off)**:
-  - Open the normal **Lyrics** screen (`🎤` button).
-  - Use the **`Visualizer: ON / OFF`** button in the top-right corner to toggle the background visualizer and customization bar on or off while reading lyrics.
+  - Open **Lyrics** (`🎤` button). Opening Lyrics from Surface Mode exits Surface Mode automatically.
+  - Toggle **`Visualizer: ON / OFF`** in the top-right bar to enable or disable the behind-lyrics visualizer.
 
 ---
 
 ### 🔄 Restoring Default Spotify / After Spotify Updates
 
-- **To Uninstall / Revert to Default Spotify**:
-  1. Run `Spotify_VelvetRed_Setup.exe`.
-  2. Click **Restore Backup** — your original `xpui.spa.bak` and default icons are restored immediately.
-- **If Spotify Auto-Updates**:
-  - When Spotify updates itself in the background, it overwrites `xpui.spa` with the default UI. Simply run `Spotify_VelvetRed_Setup.exe` and click **Install & Launch Spotify** again to re-apply the Velvet Red Edition in 2 seconds.
+- **To Uninstall Velvet Red (keeping SpotX)**:
+  - Run `Spotify_VelvetRed_Setup.exe` and click **Restore Backup** (or pass `/S /RESTORE`). Velvet Red stylesheets, scripts, and shortcut icons are removed cleanly while SpotX remains intact.
+- **If Spotify Updates**:
+  - Run `Spotify_VelvetRed_Setup.exe` with **Install / Update SpotX first** checked to patch SpotX and re-apply Velvet Red cleanly.
+
+---
+
+## 📋 Patch Notes — v1.3.9.2055 Update
+
+- **Full Spotify `1.3.9.2055` Compatibility**: Updated CSS selectors and Lyrics stacking context (`.R1kU6b2KxZc8FWfbYf3m`, `.f42lbbUT05gjuREF86Hw`, `.ISEJ4fISQcRgNTF5dVAA`, `.wYWhVPZoG93lR7ogMIug`, `.Ii0P5lvVrAzHgsutQTVz`) for Spotify Desktop `1.3.9.2055`.
+- **SpotX-First Installer Overhaul**: Added automatic SpotX pre-installation (`/SPOTX`), non-interactive execution guards, and safe in-place `xpui.spa` patching (stripped legacy bloat to shrink `Spotify_VelvetRed_Setup.exe` from ~10 MB to `229 KB`).
+- **Native 3-Band Waveform & Auto-Tempo Engine**: Migrated to Spotify `1.3.9.2055` protobuf `MetadataExtensions` (`THREEBAND_WAVEFORMS`, `AUDIO_ATTRIBUTES_V2`, `BEATS`, `LIST_TUNER_AUDIO_ANALYSIS`) with `PlayerAPI` + DOM clock sync so BPM and reactivity engage automatically without seekbar clicks.
+- **5-Model Accuracy & HUD Fixes**: Rebuilt `Scope & Bars` 48-band FFT dynamics, added Beat LED, BPM/source pill, Sensitivity selector (`Subtle`/`Balanced`/`Overdrive`), zero-overlap topbar flex HUD, Lyrics text z-index foreground clarity, and `rAF`-coalesced `MutationObserver` updates.
 
 ---
 
 ## 🔒 Privacy & Account Security
 
-- **Zero Credentials Touched**: This modification operates strictly within Spotify's frontend presentation layer (`xpui.spa`).
-- **Local DPAPI Encryption**: All Spotify credentials, OAuth refresh tokens, and session databases are stored separately in `%APPDATA%\Spotify\Users\` and protected by Windows DPAPI. Neither this theme nor the installer transmits any account data externally.
-- **100% Open-Source**: The complete installer source (`src/SetupInstaller.cs`), theme (`src/xpui.css`), and visualizer (`src/lyrics-visualizer.js`) are included in this repo.
+- **Zero Credentials Touched**: Operates strictly within Spotify's local presentation layer (`xpui.spa`).
+- **Local DPAPI Encryption**: Credentials and session tokens stay untouched in `%APPDATA%\Spotify\Users\`.
+- **Open-Source**: Full comment-free source lives in [`src/SetupInstaller.cs`](src/SetupInstaller.cs), [`src/xpui.css`](src/xpui.css), and [`src/lyrics-visualizer.js`](src/lyrics-visualizer.js).
 
 ---
 
@@ -148,11 +157,11 @@ Spotify_VelvetRed_Setup.exe /S
 
 | Component | Implementation |
 | :--- | :--- |
-| **Package Target** | `%APPDATA%\Spotify\Apps\xpui.spa` |
-| **Theme Engine** | Clean, comment-free CSS injected into `xpui.css` |
-| **Visualizer Engine** | Low-RAM `600×375` 2D Canvas Studio with 5 Models & RGB Wheel (`src/lyrics-visualizer.js`) |
-| **Icon Resource** | `%APPDATA%\Spotify\spotify-final.ico` |
-| **Installer** | Standalone .NET WinForms executable compiled via native `csc.exe` |
+| **Target Client** | Spotify Desktop `1.3.9.2055` (`%APPDATA%\Spotify\Apps\xpui.spa`) |
+| **Theme Layer** | Aero Glass & Velvet Red CSS (`src/xpui.css` → `/velvet-red.css`) |
+| **Visualizer Engine** | 5-Model 2D Canvas Studio with Protobuf `MetadataExtensions` (`src/lyrics-visualizer.js` → `/lyrics-visualizer.js`) |
+| **Icon Resource** | Multi-res `.ico` (`assets/spotify-final.ico` → `%APPDATA%\Spotify\velvet_red.ico`) |
+| **Installer** | Standalone C# WinForms single-file executable (`229,888 bytes`) |
 
 ---
 
