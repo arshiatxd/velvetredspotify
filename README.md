@@ -5,7 +5,7 @@
 <h1 align="center">🍷 Spotify Velvet Red Edition</h1>
 
 <p align="center">
-  <strong>A Windows Media Player 9 Series Velvet Red overhaul for Spotify Desktop (1.3.9.2055+).</strong><br>
+  <strong>A Windows Media Player 9 Series Velvet Red overhaul for Spotify Desktop (1.3.9.2055+ — official Spotify download only, not compatible with the Microsoft Store version).</strong><br>
   Includes automatic <strong>SpotX</strong> pre-installation, authentic <strong>WMP 9 Velvet Chrome &amp; Left Taskbar</strong> layout, top-mounted seekbar with oval jewel thumb, a Compact <strong>3D Crimson Play/Pause Orb</strong> cradle, and all <strong>9 Classic WMP Visualizers</strong> (`No Visualization`, `Album Art`, `Alchemy`, `Ambience`, `Bars and Waves`, `Battery`, `Particle`, `Plenoptic`, `Spikes`) powered by Spotify's native 3-band protobuf waveforms &amp; BPM telemetry.
 </p>
 
