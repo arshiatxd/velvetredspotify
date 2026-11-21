@@ -3,12 +3,88 @@
   window.__wmpVelvetVisualizerInit = true;
 
   const MODELS = [
-    { id: "tunnel", label: "XP Tunnel" },
-    { id: "spiral", label: "Spiral Vortex" },
-    { id: "starburst", label: "WMC Starburst" },
-    { id: "scope", label: "Scope & Bars" },
-    { id: "cyber", label: "Cyber Orb" }
+    { id: "none", label: "No Visualization", shortLabel: "Off", presets: [{ id: "default", label: "No Visualization" }] },
+    { id: "album", label: "Album Art", shortLabel: "Album Art", presets: [{ id: "default", label: "Album Art" }] },
+    {
+      id: "alchemy",
+      label: "Alchemy",
+      shortLabel: "Alchemy",
+      presets: [
+        { id: "blossom", label: "Velvet Blossom" },
+        { id: "random", label: "Random" },
+        { id: "spectrum", label: "Crimson Bloom" }
+      ]
+    },
+    {
+      id: "ambience",
+      label: "Ambience",
+      shortLabel: "Ambience",
+      presets: [
+        { id: "warp", label: "Warp" },
+        { id: "water", label: "Water" },
+        { id: "fire", label: "Fire" }
+      ]
+    },
+    {
+      id: "bars",
+      label: "Bars and Waves",
+      shortLabel: "Bars & Waves",
+      presets: [
+        { id: "bars", label: "Bars" },
+        { id: "scope", label: "Scope" },
+        { id: "mist", label: "Ocean Mist" }
+      ]
+    },
+    {
+      id: "battery",
+      label: "Battery",
+      shortLabel: "Battery",
+      presets: [
+        { id: "brightsphere", label: "Brightsphere" },
+        { id: "electriarnation", label: "Electriarnation" },
+        { id: "whirlpool", label: "Whirlpool" },
+        { id: "smokewater", label: "Smoke & Water" }
+      ]
+    },
+    {
+      id: "particle",
+      label: "Particle",
+      shortLabel: "Particle",
+      presets: [
+        { id: "rotating", label: "Rotating Particle" },
+        { id: "fountain", label: "Galaxy Fountain" },
+        { id: "aurora", label: "Aurora Drift" }
+      ]
+    },
+    {
+      id: "plenoptic",
+      label: "Plenoptic",
+      shortLabel: "Plenoptic",
+      presets: [
+        { id: "smokey", label: "Smokey Circles" },
+        { id: "prism", label: "Prism Tunnel" },
+        { id: "fractal", label: "Fractal Web" }
+      ]
+    },
+    {
+      id: "spikes",
+      label: "Spikes",
+      shortLabel: "Spikes",
+      presets: [
+        { id: "radial", label: "Radial Flare" },
+        { id: "corona", label: "Crimson Corona" },
+        { id: "crossfire", label: "Crossfire" }
+      ]
+    }
   ];
+
+  const LEGACY_MODEL_MAP = {
+    tunnel: { model: "ambience", preset: "warp" },
+    spiral: { model: "battery", preset: "whirlpool" },
+    starburst: { model: "spikes", preset: "radial" },
+    scope: { model: "bars", preset: "bars" },
+    cyber: { model: "alchemy", preset: "blossom" }
+  };
 
   const SENSITIVITY_MAP = {
     subtle: 0.78,
@@ -18,6 +94,7 @@
 
   const STORE_KEYS = {
     model: "wmp_viz_model_v2",
+    preset: "wmp_viz_preset_v2",
     hue: "wmp_viz_hue_v2",
     sat: "wmp_viz_sat_v2",
     rgbRotate: "wmp_viz_rgb_rotate_v2",
@@ -40,18 +117,42 @@
     } catch {}
   }
 
+  function getModelDef(modelId) {
+    for (let i = 0; i < MODELS.length; i++) {
+      if (MODELS[i].id === modelId) return MODELS[i];
+    }
+    return MODELS[3];
+  }
+
+  function resolveModelAndPreset(rawModel, rawPreset) {
+    if (LEGACY_MODEL_MAP[rawModel]) {
+      return LEGACY_MODEL_MAP[rawModel];
+    }
+    const def = getModelDef(rawModel);
+    if (def.id !== rawModel) {
+      return { model: "ambience", preset: "warp" };
+    }
+    const hasPreset = def.presets.some((p) => p.id === rawPreset);
+    return {
+      model: def.id,
+      preset: hasPreset ? rawPreset : def.presets[0].id
+    };
+  }
+
+  const initialChoice = resolveModelAndPreset(
+    readStore(STORE_KEYS.model, "ambience"),
+    readStore(STORE_KEYS.preset, "warp")
+  );
+
   const config = {
-    model: readStore(STORE_KEYS.model, "tunnel"),
+    model: initialChoice.model,
+    preset: initialChoice.preset,
     hue: Math.max(0, Math.min(360, Number(readStore(STORE_KEYS.hue, "348")) || 348)),
     sat: Math.max(0, Math.min(100, Number(readStore(STORE_KEYS.sat, "88")) || 88)),
     rgbRotate: readStore(STORE_KEYS.rgbRotate, "1") === "1",
     lyricsEnabled: readStore(STORE_KEYS.lyricsEnabled, "1") === "1",
     sensitivity: SENSITIVITY_MAP[readStore(STORE_KEYS.sensitivity, "balanced")] ? readStore(STORE_KEYS.sensitivity, "balanced") : "balanced"
   };
-
-  if (!MODELS.some((m) => m.id === config.model)) {
-    config.model = "tunnel";
-  }
 
   const runtime = {
     surfaceMode: false,
@@ -68,13 +169,19 @@
     spinDir: 1,
     spinVel: 1,
     lastPath: location.pathname,
-    wasLyricsRoute: false
+    wasLyricsRoute: false,
+    menuOpen: false,
+    hudContainerMode: "",
+    fsIdle: false,
+    fsIdleTimer: 0,
+    lastMouseMoveMs: 0
   };
 
   const playback = {
     trackUri: "",
     title: "",
     artist: "",
+    coverUrl: "",
     durationMs: 0,
     isPaused: true,
     speed: 1,
@@ -114,11 +221,59 @@
   const spkHue = new Float32Array(SPK_COUNT);
   let spkCursor = 0;
 
+  const FX_W = 192;
+  const FX_H = 144;
+  const fxNormX = new Float32Array(FX_W * FX_H);
+  const fxNormY = new Float32Array(FX_W * FX_H);
+  const fxDist = new Float32Array(FX_W * FX_H);
+  const fxAng = new Float32Array(FX_W * FX_H);
+  (function initFxLuts() {
+    for (let y = 0; y < FX_H; y++) {
+      const ny = (y / (FX_H - 1)) * 2 - 1;
+      for (let x = 0; x < FX_W; x++) {
+        const nx = (x / (FX_W - 1)) * 2 - 1;
+        const idx = y * FX_W + x;
+        fxNormX[idx] = nx;
+        fxNormY[idx] = ny;
+        fxDist[idx] = Math.sqrt(nx * nx * 1.15 + ny * ny * 0.88);
+        fxAng[idx] = Math.atan2(ny, nx);
+      }
+    }
+  })();
+
+  const PT_COUNT = 480;
+  const ptX = new Float32Array(PT_COUNT);
+  const ptY = new Float32Array(PT_COUNT);
+  const ptZ = new Float32Array(PT_COUNT);
+  const ptR = new Float32Array(PT_COUNT);
+  const ptA = new Float32Array(PT_COUNT);
+  const ptSeed = new Float32Array(PT_COUNT);
+  (function initParticles() {
+    let s = 1337;
+    const rnd = () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+    for (let i = 0; i < PT_COUNT; i++) {
+      const arm = i % 3;
+      const dist = Math.pow(rnd(), 0.72);
+      const ang = dist * 7.8 + arm * ((Math.PI * 2) / 3) + (rnd() - 0.5) * 0.95;
+      ptX[i] = Math.cos(ang) * dist;
+      ptY[i] = (rnd() - 0.5) * 0.34 * (1.15 - dist * 0.5);
+      ptZ[i] = Math.sin(ang) * dist;
+      ptR[i] = dist;
+      ptA[i] = ang;
+      ptSeed[i] = rnd();
+    }
+  })();
+
   const meter = {
     bass: 0,
     mid: 0,
     high: 0,
     energy: 0,
+    softBass: 0,
+    softEnergy: 0,
     beatPulse: 0,
     kick: 0,
     snare: 0,
@@ -133,6 +288,9 @@
     lastOnsetWallMs: 0,
     bins: new Float32Array(48),
     peaks: new Float32Array(48),
+    bins32: new Float32Array(32),
+    peaks32: new Float32Array(32),
+    peaks32Vel: new Float32Array(32),
     wave: new Float32Array(128),
     waveB: new Float32Array(128)
   };
@@ -152,6 +310,10 @@
   let ctx = null;
   let fbCanvas = null;
   let fbCtx = null;
+  let fxCanvas = null;
+  let fxCtx = null;
+  let fxImg = null;
+  let fxU32 = null;
   let hudRoot = null;
   let wheelCanvas = null;
   let wheelMarker = null;
@@ -159,6 +321,13 @@
   let bpmLabelEl = null;
   let titleEl = null;
   let artistEl = null;
+  let tickerLeftEl = null;
+  let tickerRightEl = null;
+  let presetLabelEl = null;
+  let popupMenuEl = null;
+  let coverImg = null;
+  let coverImgSrc = "";
+  let loadedCoverSrc = "";
 
   function normalizeSeries(arr) {
     if (!arr || !arr.length) return null;
@@ -295,7 +464,15 @@
     bindHistoryEvents();
   }
 
+  function closeVizPopupMenu() {
+    runtime.menuOpen = false;
+    if (popupMenuEl) {
+      popupMenuEl.classList.remove("open");
+    }
+  }
+
   function exitSurfaceMode(keepFullscreen) {
+    closeVizPopupMenu();
     if (!runtime.surfaceMode && (!runtime.isFullscreen || keepFullscreen)) return;
     runtime.surfaceMode = false;
     if (!keepFullscreen && runtime.isFullscreen) {
@@ -357,12 +534,43 @@
     return -1;
   }
 
+  function normalizeCoverUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== "string") return "";
+    const u = rawUrl.trim();
+    if (!u) return "";
+    if (u.startsWith("spotify:image:")) {
+      return `https://i.scdn.co/image/${u.slice("spotify:image:".length)}`;
+    }
+    return u;
+  }
+
+  function ensureCoverImage(url) {
+    if (!url || url === coverImgSrc) return;
+    coverImgSrc = url;
+    loadedCoverSrc = "";
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => {
+      if (coverImgSrc === url && img.naturalWidth > 0) {
+        coverImg = img;
+        loadedCoverSrc = url;
+      }
+    };
+    img.onerror = () => {
+      if (url.includes("ab67616d0000b273")) {
+        ensureCoverImage(url.replace("ab67616d0000b273", "ab67616d00001e02"));
+      }
+    };
+    img.src = url;
+  }
+
   function readDomPlaybackHints() {
     const posEl = document.querySelector('[data-testid="playback-position"]');
     const durEl = document.querySelector('[data-testid="playback-duration"]');
     const titleNode = document.querySelector('[data-testid="context-item-info-title"] a, [data-testid="context-item-link"]');
     const artistNodes = document.querySelectorAll('[data-testid="context-item-info-artist"], [data-testid="context-item-info-subtitles"] a');
     const playBtn = document.querySelector('button[data-testid="control-button-playpause"]');
+    const bigCoverEl = document.querySelector('.s8fIIxwITjOk1aFOxhPv img[data-testid="cover-art-image"], aside[data-testid="now-playing-bar"] img[data-testid="cover-art-image"]');
 
     const domPosText = posEl ? posEl.textContent.trim() : "";
     const domPosSec = parseDomClockSeconds(domPosText);
@@ -379,6 +587,14 @@
     if (artistNodes.length > 0 && !playback.artist) {
       playback.artist = Array.from(artistNodes).map((n) => n.textContent.trim()).filter(Boolean).join(", ");
     }
+    if (bigCoverEl && bigCoverEl.src) {
+      const rawDomSrc = normalizeCoverUrl(bigCoverEl.src);
+      const upgradedSrc = rawDomSrc.includes("00004851") ? rawDomSrc.replace("00004851", "0000b273") : rawDomSrc;
+      if (upgradedSrc && (!playback.coverUrl || upgradedSrc.includes("0000b273"))) {
+        playback.coverUrl = upgradedSrc;
+        ensureCoverImage(playback.coverUrl);
+      }
+    }
 
     let domPaused = null;
     if (domPosText && Date.now() - playback.lastDomChangeWallMs < 1500) {
@@ -390,6 +606,21 @@
     }
 
     return { domPosSec, domDurSec, domPaused };
+  }
+
+  function pickBestCoverFromItem(item) {
+    if (!item || typeof item !== "object") return "";
+    const md = item.metadata || {};
+    const metaCandidate = md.image_xlarge_url || md.image_large_url || md.image_url || md.image_small_url || "";
+    const imgs = (item.album && Array.isArray(item.album.images) && item.album.images) || (Array.isArray(item.images) && item.images) || null;
+    if (imgs && imgs.length > 0) {
+      let best = imgs[0];
+      for (let i = 1; i < imgs.length; i++) {
+        if ((imgs[i].width || 0) > (best.width || 0)) best = imgs[i];
+      }
+      if (best && best.url) return normalizeCoverUrl(best.url);
+    }
+    return normalizeCoverUrl(metaCandidate);
   }
 
   function applyPlayerState(raw) {
@@ -406,6 +637,11 @@
       }
       const dMs = Number(item.duration?.milliseconds ?? raw.duration ?? item.metadata?.duration ?? 0);
       if (dMs > 0) playback.durationMs = dMs;
+      const artUrl = pickBestCoverFromItem(item);
+      if (artUrl) {
+        playback.coverUrl = artUrl;
+        ensureCoverImage(artUrl);
+      }
     }
 
     const rawPaused = raw.isPaused ?? raw.is_paused;
@@ -943,6 +1179,9 @@
     meter.energy = meter.bass * 0.50 + meter.mid * 0.32 + meter.high * 0.18;
 
     runtime.spinVel += (1 + meter.energy * 0.9 - runtime.spinVel) * (1 - Math.exp(-dtSec * 5.2));
+    const softK = 1 - Math.exp(-dtSec * 2.3);
+    meter.softBass += (meter.bass - meter.softBass) * softK;
+    meter.softEnergy += (meter.energy - meter.softEnergy) * softK;
 
     const tSec = posMs * 0.001;
     for (let i = 0; i < 48; i++) {
@@ -973,16 +1212,30 @@
       }
     }
 
+    for (let i = 0; i < 32; i++) {
+      const fIdx = Math.min(47, Math.floor((i / 31) * 46));
+      const nIdx = Math.min(47, fIdx + 1);
+      const val = Math.max(0.02, Math.min(1, meter.bins[fIdx] * 0.65 + meter.bins[nIdx] * 0.35));
+      meter.bins32[i] = val;
+      if (val >= meter.peaks32[i]) {
+        meter.peaks32[i] = val;
+        meter.peaks32Vel[i] = 0;
+      } else {
+        meter.peaks32Vel[i] = Math.min(2.6, meter.peaks32Vel[i] + dtSec * 2.4);
+        meter.peaks32[i] = Math.max(val, meter.peaks32[i] - meter.peaks32Vel[i] * dtSec);
+      }
+    }
+
     for (let i = 0; i < 128; i++) {
       const p = (i / 128) * Math.PI * 2;
       const b0 = meter.bins[(i * 3) % 48];
       const b1 = meter.bins[(i * 7 + 19) % 48];
-      const wSub = Math.sin(p * 3 + tSec * 9.5) * (0.28 + meter.bass * 0.78 + meter.kick * 0.32);
-      const wMid = Math.sin(p * 8 - tSec * 16.5) * (0.18 + meter.mid * 0.58 + b0 * 0.36);
-      const wHigh = Math.sin(p * 23 + tSec * 31.0) * (0.08 + meter.high * 0.52 + b1 * 0.28);
-      const edgeBuzz = ((i & 1) === 0 ? 1 : -1) * Math.pow(Math.max(0, Math.sin(p * 11 + tSec * 24)), 3) * (meter.snare * 0.42 + meter.high * 0.24);
-      meter.wave[i] = Math.max(-1.6, Math.min(1.6, wSub + wMid + wHigh + edgeBuzz));
-      meter.waveB[i] = Math.max(-1.6, Math.min(1.6, Math.cos(p * 4 - tSec * 11.2) * (0.24 + meter.mid * 0.72) - wHigh * 0.85 + edgeBuzz * 0.7));
+      const wSub = Math.sin(p * 3 + tSec * 9.5) * (0.28 + meter.bass * 0.78 + meter.kick * 0.28);
+      const wMid = Math.sin(p * 8 - tSec * 15.5) * (0.18 + meter.mid * 0.56 + b0 * 0.34);
+      const wHigh = Math.sin(p * 14 + tSec * 21.0) * (0.08 + meter.high * 0.42 + b1 * 0.22);
+      const edgeRipple = Math.sin(p * 11 - tSec * 18.0) * Math.cos(p * 5 + tSec * 9.0) * (meter.snare * 0.28 + meter.high * 0.18);
+      meter.wave[i] = Math.max(-1.5, Math.min(1.5, wSub + wMid + wHigh + edgeRipple));
+      meter.waveB[i] = Math.max(-1.5, Math.min(1.5, Math.cos(p * 4 - tSec * 10.6) * (0.24 + meter.mid * 0.68) - wHigh * 0.72 + edgeRipple * 0.55));
     }
 
     runtime.phase += dtSec * (1.8 + meter.energy * 4.4 + (bpm / 120) * 1.15);
@@ -1002,406 +1255,995 @@
   function hslColor(hueOffset, alpha, lightBoost) {
     const h = ((runtime.rotHue + hueOffset) % 360 + 360) % 360;
     const s = config.rgbRotate ? Math.max(82, config.sat) : config.sat;
-    const l = Math.max(18, Math.min(96, 54 + (lightBoost || 0)));
+    const l = Math.max(12, Math.min(96, 54 + (lightBoost || 0)));
     return `hsla(${h.toFixed(1)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%, ${alpha.toFixed(3)})`;
   }
 
-  function renderTunnel(w, h, dtSec, isPlaying) {
-    const minDim = Math.min(w, h);
-    const driftAmp = isPlaying ? (0.085 + meter.energy * 0.065) : 0.03;
-    const ox = Math.sin(runtime.driftPhase * 0.82) * w * driftAmp + meter.shakeX * w;
-    const oy = Math.cos(runtime.driftPhase * 1.13) * h * driftAmp + meter.shakeY * h;
-    const cx = w * 0.5 + ox;
-    const cy = h * 0.5 + oy;
-
-    const zoom = isPlaying ? (1.046 + meter.bass * 0.088 + meter.kick * 0.065) : 1.016;
-    const rot = isPlaying ? (Math.sin(runtime.tunnelPhase * 0.58) * 0.018 + meter.mid * 0.016 * runtime.spinDir) : 0.004;
-    const shiftX = isPlaying ? (Math.sin(runtime.driftPhase * 0.82) * 0.0055) : 0;
-    const shiftY = isPlaying ? (Math.cos(runtime.driftPhase * 1.13) * 0.0055) : 0;
-    const fade = isPlaying ? Math.max(0.04, 0.14 - Math.min(0.08, meter.energy * 0.055)) : 0.24;
-
-    applyFeedbackPass(w, h, zoom, rot, fade, shiftX, shiftY, 0.91);
-    ctx.globalCompositeOperation = "lighter";
-
-    if (isPlaying && meter.shock > 0.05) {
-      const shockR = minDim * (0.14 + (1 - meter.shock) * 0.48);
-      ctx.beginPath();
-      ctx.arc(cx, cy, shockR, 0, Math.PI * 2);
-      ctx.lineWidth = 1.6 + meter.shock * 3.5;
-      ctx.strokeStyle = hslColor(18, meter.shock * 0.65, 34);
-      ctx.stroke();
+  const rgbScratch = [255, 0, 80];
+  function hslToRgb(hDeg, s01, l01, out) {
+    const h = ((hDeg % 360) + 360) % 360;
+    const s = s01 < 0 ? 0 : s01 > 1 ? 1 : s01;
+    const l = l01 < 0 ? 0 : l01 > 1 ? 1 : l01;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c * 0.5;
+    let r1 = 0;
+    let g1 = 0;
+    let b1 = 0;
+    if (h < 60) {
+      r1 = c; g1 = x;
+    } else if (h < 120) {
+      r1 = x; g1 = c;
+    } else if (h < 180) {
+      g1 = c; b1 = x;
+    } else if (h < 240) {
+      g1 = x; b1 = c;
+    } else if (h < 300) {
+      r1 = x; b1 = c;
+    } else {
+      r1 = c; b1 = x;
     }
+    out[0] = Math.max(0, Math.min(255, ((r1 + m) * 255) | 0));
+    out[1] = Math.max(0, Math.min(255, ((g1 + m) * 255) | 0));
+    out[2] = Math.max(0, Math.min(255, ((b1 + m) * 255) | 0));
+    return out;
+  }
 
-    const outerHalo = ctx.createRadialGradient(cx, cy, minDim * 0.08, cx, cy, minDim * (0.34 + meter.bass * 0.14));
-    outerHalo.addColorStop(0, "rgba(0, 0, 0, 0)");
-    outerHalo.addColorStop(0.55, hslColor(-12, 0.14 + meter.bass * 0.18, 12));
-    outerHalo.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = outerHalo;
+  function ensureFxBuffer() {
+    if (!fxCanvas) {
+      fxCanvas = document.createElement("canvas");
+      fxCanvas.width = FX_W;
+      fxCanvas.height = FX_H;
+      fxCtx = fxCanvas.getContext("2d", { alpha: false });
+      fxImg = fxCtx.createImageData(FX_W, FX_H);
+      fxU32 = new Uint32Array(fxImg.data.buffer);
+    }
+  }
+
+  function flushFxToMain(w, h) {
+    fxCtx.putImageData(fxImg, 0, 0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(fxCanvas, 0, 0, w, h);
+    ctx.restore();
+  }
+
+  function drawWmpFallbackNote(x, y, size, pulse) {
+    const cx = x + size * 0.5;
+    const cy = y + size * 0.5;
+    const frameGrad = ctx.createLinearGradient(x, y, x, y + size);
+    frameGrad.addColorStop(0, "#1c050c");
+    frameGrad.addColorStop(0.5, "#0d0205");
+    frameGrad.addColorStop(1, "#040102");
+    ctx.fillStyle = frameGrad;
+    ctx.fillRect(x, y, size, size);
+
+    ctx.strokeStyle = hslColor(0, 0.45 + pulse * 0.25, 22);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
+
+    const orbR = size * 0.34;
+    const orbGrad = ctx.createRadialGradient(cx - orbR * 0.28, cy - orbR * 0.28, orbR * 0.08, cx, cy, orbR);
+    orbGrad.addColorStop(0, "rgba(255, 232, 238, 0.36)");
+    orbGrad.addColorStop(0.45, hslColor(0, 0.65, 8));
+    orbGrad.addColorStop(1, "rgba(18, 2, 7, 0.95)");
+    ctx.fillStyle = orbGrad;
     ctx.beginPath();
-    ctx.arc(cx, cy, minDim * 0.48, 0, Math.PI * 2);
+    ctx.arc(cx, cy, orbR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = hslColor(8, 0.72, 28);
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    const noteGrad = ctx.createLinearGradient(cx - orbR * 0.4, cy - orbR * 0.5, cx + orbR * 0.4, cy + orbR * 0.5);
+    noteGrad.addColorStop(0, "#ffffff");
+    noteGrad.addColorStop(0.5, "#f5bccb");
+    noteGrad.addColorStop(1, "#ff4d6d");
+    ctx.fillStyle = noteGrad;
+    ctx.strokeStyle = noteGrad;
+
+    const stemX = cx + size * 0.04;
+    const headX = cx - size * 0.05;
+    const headY = cy + size * 0.14;
+    ctx.beginPath();
+    ctx.ellipse(headX, headY, size * 0.09, size * 0.064, -0.35, 0, Math.PI * 2);
     ctx.fill();
 
-    const baseR = minDim * (0.17 + meter.bass * 0.085 + meter.kick * 0.045);
-    const strands = 8;
-    const pts = 128;
-
-    for (let s = 0; s < strands; s++) {
-      const isHotCore = s >= 5;
-      const strandShift = (s / strands) * Math.PI * 2;
-      const hueOff = (s * 38) - 52;
-      ctx.beginPath();
-      ctx.lineWidth = isHotCore ? (0.95 + meter.high * 0.65) : (2.1 + meter.bass * 1.4);
-      ctx.strokeStyle = hslColor(hueOff, isHotCore ? 0.95 : 0.62, isHotCore ? 38 : 10);
-
-      for (let i = 0; i <= pts; i++) {
-        const a = (i / pts) * Math.PI * 2;
-        const wIdx = i & 127;
-        const wVal = meter.wave[(wIdx + s * 17) & 127];
-        const wAlt = meter.waveB[(wIdx + s * 29) & 127];
-        const bVal = meter.bins[(i + s * 5) % 48];
-        const sharpTooth = Math.sin(a * (7 + (s % 4) * 2) + runtime.phase * (1.8 + s * 0.35) * runtime.spinDir) * (4 + meter.mid * 18 + meter.snare * 16);
-        const r = Math.max(14, baseR + (wVal * 0.65 + wAlt * 0.35) * minDim * (0.055 + meter.bass * 0.068) + bVal * minDim * 0.058 + sharpTooth);
-        const px = cx + Math.cos(a + strandShift * 0.06) * r;
-        const py = cy + Math.sin(a + strandShift * 0.06) * r;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.stroke();
-    }
-
-    if (isPlaying && (meter.kick > 0.32 || meter.high > 0.55)) {
-      const rayCount = 16;
-      for (let rIdx = 0; rIdx < rayCount; rIdx++) {
-        const bVal = meter.bins[(rIdx * 3) % 48];
-        if (bVal < 0.36) continue;
-        const ang = (rIdx / rayCount) * Math.PI * 2 + runtime.phase * 0.45 * runtime.spinDir;
-        const rStart = baseR * 1.05;
-        const rEnd = rStart + minDim * (0.12 + bVal * 0.24 + meter.kick * 0.14);
-        ctx.strokeStyle = hslColor(rIdx * 18, 0.55 + bVal * 0.35, 30);
-        ctx.lineWidth = 1.0 + bVal * 1.4;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(ang) * rStart, cy + Math.sin(ang) * rStart);
-        ctx.lineTo(cx + Math.cos(ang) * rEnd, cy + Math.sin(ang) * rEnd);
-        ctx.stroke();
-      }
-    }
-
-    stepAndDrawSparks(dtSec, cx, cy, minDim, 0.9 * runtime.spinDir);
-    ctx.globalCompositeOperation = "source-over";
-  }
-
-  function renderSpiral(w, h, dtSec, isPlaying) {
-    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w : 0);
-    const cy = h * 0.5 + (isPlaying ? meter.shakeY * h : 0);
-    const minDim = Math.min(w, h);
-    const maxR = minDim * 0.48;
-
-    const zoom = isPlaying ? (1.032 + meter.bass * 0.056 + meter.kick * 0.042) : 1.012;
-    const swirl = isPlaying ? ((0.032 + meter.energy * 0.052 + meter.kick * 0.034) * runtime.spinDir) : 0.008;
-    const fade = isPlaying ? 0.14 : 0.24;
-
-    applyFeedbackPass(w, h, zoom, swirl, fade, 0, 0, 0.90);
-    ctx.globalCompositeOperation = "lighter";
-
-    const arms = 6;
-    const steps = 88;
-    for (let a = 0; a < arms; a++) {
-      const baseAngle = (a / arms) * Math.PI * 2 + runtime.spiralPhase;
-
-      for (let pass = 0; pass < 2; pass++) {
-        ctx.beginPath();
-        ctx.lineWidth = pass === 0 ? (3.2 + meter.bass * 2.2) : (1.05 + meter.high * 0.6);
-        ctx.strokeStyle = hslColor(a * 42 + pass * 16, pass === 0 ? 0.65 : 0.96, pass === 0 ? 10 : 38);
-
-        for (let i = 0; i < steps; i++) {
-          const t = i / (steps - 1);
-          const bin = meter.bins[Math.floor(t * 47)];
-          const wave = meter.wave[Math.floor(t * 127)];
-          const radius = t * maxR * (0.86 + meter.bass * 0.24 + meter.kick * 0.12);
-          const twist = 5.4 + meter.mid * 2.4 + meter.kick * 1.1;
-          const theta = baseAngle + t * twist * runtime.spinDir + Math.sin(t * 12 - runtime.phase * 1.4) * (0.16 + bin * 0.36);
-          const amp = (bin * 34 + wave * 18) * (0.35 + t * 0.9);
-          const x = cx + Math.cos(theta) * (radius + amp);
-          const y = cy + Math.sin(theta) * (radius + amp);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-      }
-    }
-
-    const coreR = 14 + meter.bass * 36 + meter.kick * 28;
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 2.6);
-    grad.addColorStop(0, hslColor(0, 0.96, 40));
-    grad.addColorStop(0.32, hslColor(22, 0.72, 18));
-    grad.addColorStop(0.7, hslColor(-24, 0.28, 6));
-    grad.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = grad;
+    ctx.lineWidth = Math.max(3, size * 0.042);
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(cx, cy, coreR * 2.6, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(stemX, headY - size * 0.02);
+    ctx.lineTo(stemX, cy - size * 0.19);
+    ctx.stroke();
 
-    if (isPlaying && meter.beatPulse > 0.25) {
-      spawnSparks(3, 0.08, 0.55 + meter.bass * 0.85, 45, 0, 0);
-    }
-    stepAndDrawSparks(dtSec, cx, cy, minDim, 2.8 * runtime.spinDir);
-    ctx.globalCompositeOperation = "source-over";
+    ctx.beginPath();
+    ctx.moveTo(stemX, cy - size * 0.19);
+    ctx.bezierCurveTo(stemX + size * 0.16, cy - size * 0.15, stemX + size * 0.15, cy - size * 0.02, stemX + size * 0.06, cy + size * 0.01);
+    ctx.lineWidth = Math.max(2.5, size * 0.036);
+    ctx.stroke();
   }
 
-  function renderStarburst(w, h, dtSec, isPlaying) {
-    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w : 0);
-    const cy = h * 0.5 + (isPlaying ? meter.shakeY * h : 0);
-    const minDim = Math.min(w, h);
-
-    const zoom = isPlaying ? (1.030 + meter.bass * 0.052 + meter.kick * 0.048) : 1.010;
-    const twist = isPlaying ? (Math.sin(runtime.phase * 0.35) * 0.024 * runtime.spinDir) : 0.003;
-    applyFeedbackPass(w, h, zoom, twist, isPlaying ? 0.14 : 0.24, 0, 0, 0.89);
-
-    ctx.globalCompositeOperation = "lighter";
-
-    const crowns = 8;
-    const pts = 96;
-    for (let l = 0; l < crowns; l++) {
-      const k = l / (crowns - 1);
-      const baseR = minDim * (0.075 + k * 0.34) * (0.85 + meter.bass * 0.28 + meter.kick * 0.18);
-      const spikes = 6 + (l % 4) * 2;
-      const dir = l % 2 === 0 ? runtime.spinDir : -runtime.spinDir;
-
-      for (let pass = 0; pass < 2; pass++) {
-        ctx.beginPath();
-        ctx.lineWidth = pass === 0 ? (2.4 + (1 - k) * 1.8) : 0.95;
-        ctx.strokeStyle = hslColor(l * 30 - 35 + pass * 14, pass === 0 ? (0.72 - k * 0.22) : 0.92, pass === 0 ? 10 : 38);
-
-        for (let i = 0; i <= pts; i++) {
-          const ang = (i / pts) * Math.PI * 2;
-          const bin = meter.bins[(i + l * 5) % 48];
-          const wVal = meter.wave[(i * 2 + l * 13) & 127];
-          const petal = Math.pow(Math.abs(Math.sin(ang * (spikes * 0.5) + runtime.phase * (0.9 + l * 0.15) * dir)), 1.6);
-          const jagged = petal * (18 + meter.mid * 46 + meter.kick * 28) + bin * (22 + meter.high * 44) + wVal * (8 + meter.snare * 18);
-          const r = Math.max(8, baseR + jagged);
-          const x = cx + Math.cos(ang) * r;
-          const y = cy + Math.sin(ang) * r;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.stroke();
-      }
-    }
-
-    if (isPlaying) {
-      const needleCount = 24;
-      for (let n = 0; n < needleCount; n++) {
-        const ang = (n / needleCount) * Math.PI * 2 + runtime.phase * 0.65 * runtime.spinDir;
-        const bin = meter.bins[(n * 2) % 48];
-        const rIn = minDim * (0.06 + meter.kick * 0.04);
-        const rOut = minDim * (0.22 + bin * 0.28 + meter.beatPulse * 0.08);
-        ctx.strokeStyle = hslColor(n * 15, 0.55 + bin * 0.4, 34);
-        ctx.lineWidth = 1.2 + bin * 1.4;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(ang) * rIn, cy + Math.sin(ang) * rIn);
-        ctx.lineTo(cx + Math.cos(ang) * rOut, cy + Math.sin(ang) * rOut);
-        ctx.stroke();
-      }
-    }
-
-    stepAndDrawSparks(dtSec, cx, cy, minDim, 1.4 * runtime.spinDir);
+  function renderNoViz(w, h) {
     ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = runtime.surfaceMode || runtime.isFullscreen ? "#000000" : "rgba(6, 1, 3, 0.88)";
+    ctx.fillRect(0, 0, w, h);
   }
 
-  function renderScope(w, h, dtSec, isPlaying) {
-    const zoom = isPlaying ? (1.022 + meter.bass * 0.028 + meter.kick * 0.018) : 1.005;
-    applyFeedbackPass(w, h, zoom, 0, isPlaying ? 0.24 : 0.30, 0, 0, 0.84);
+  function renderAlbumArt(w, h, dtSec, isPlaying) {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = runtime.surfaceMode || runtime.isFullscreen ? "#000000" : "#070103";
+    ctx.fillRect(0, 0, w, h);
 
+    const pulse = isPlaying ? (meter.bass * 0.022 + meter.beatPulse * 0.014) : 0;
+    const baseSize = Math.max(92, Math.min(w * 0.44, h * 0.56));
+    const size = baseSize * (1 + pulse);
+    const x = (w - size) * 0.5;
+    const y = Math.max(28, (h - size) * 0.40);
+
+    const bgGlow = ctx.createRadialGradient(x + size * 0.5, y + size * 0.5, size * 0.1, x + size * 0.5, y + size * 0.5, size * 0.95);
+    bgGlow.addColorStop(0, hslColor(0, 0.14 + (isPlaying ? meter.bass * 0.16 : 0.03), 12));
+    bgGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = bgGlow;
+    ctx.fillRect(0, 0, w, h);
+
+    const hasArt = !!(coverImg && loadedCoverSrc && coverImg.naturalWidth > 0);
+    if (hasArt) {
+      ctx.drawImage(coverImg, x, y, size, size);
+      ctx.strokeStyle = "rgba(255, 224, 232, 0.24)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+    } else {
+      drawWmpFallbackNote(x, y, size, isPlaying ? meter.beatPulse : 0);
+    }
+
+    const refTop = y + size + 2;
+    const refH = Math.max(20, Math.min(h - refTop, size * 0.56));
+    if (refH > 8) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, refTop, size, refH);
+      ctx.clip();
+      ctx.translate(x, refTop);
+      ctx.scale(1, -1);
+      if (hasArt) {
+        ctx.drawImage(coverImg, 0, -size, size, size);
+      } else {
+        drawWmpFallbackNote(0, -size, size, isPlaying ? meter.beatPulse : 0);
+      }
+      ctx.restore();
+
+      const fadeGrad = ctx.createLinearGradient(0, refTop, 0, refTop + refH);
+      fadeGrad.addColorStop(0, "rgba(0, 0, 0, 0.54)");
+      fadeGrad.addColorStop(0.65, "rgba(0, 0, 0, 0.92)");
+      fadeGrad.addColorStop(1, "#000000");
+      ctx.fillStyle = fadeGrad;
+      ctx.fillRect(x - 1, refTop, size + 2, refH + 2);
+    }
+  }
+
+  function renderAlchemy(w, h, dtSec, isPlaying, preset) {
     const cx = w * 0.5;
     const cy = h * 0.5;
     const minDim = Math.min(w, h);
-    const padX = Math.max(20, w * 0.04);
-    const usableW = w - padX * 2;
-    const barCount = 48;
-    const slotW = usableW / barCount;
-    const barW = Math.max(4, slotW * 0.72);
-    const maxBarH = h * 0.36;
+    const e = isPlaying ? meter.softEnergy : 0.14;
+    const b = isPlaying ? meter.softBass : 0.12;
+    const m = isPlaying ? meter.mid : 0.10;
+    const ph = runtime.driftPhase;
 
-    ctx.globalCompositeOperation = "lighter";
+    if (preset === "random") {
+      applyFeedbackPass(w, h, 1.004, 0.002 * runtime.spinDir, isPlaying ? 0.16 : 0.24, 0, 0, 0.85);
+      ctx.globalCompositeOperation = "screen";
 
-    if (isPlaying && meter.kick > 0.2) {
-      ctx.strokeStyle = hslColor(12, meter.kick * 0.55, 36);
-      ctx.lineWidth = 1.5 + meter.kick * 3.0;
+      for (let c = 0; c < 3; c++) {
+        const px = cx + Math.sin(ph * (0.38 + c * 0.14) + c * 2.1) * w * 0.26;
+        const py = cy + Math.cos(ph * (0.31 + c * 0.11) + c * 1.7) * h * 0.22;
+        const rad = minDim * (0.24 + c * 0.06 + b * 0.08);
+        const cg = ctx.createRadialGradient(px, py, 0, px, py, rad);
+        cg.addColorStop(0, hslColor(c * 88 + 20, 0.065 + e * 0.05, -8));
+        cg.addColorStop(0.55, hslColor(c * 88 + 64, 0.025 + m * 0.025, -20));
+        cg.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.arc(px, py, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (let wv = 0; wv < 4; wv++) {
+        const pts = [];
+        const baseY = h * (0.28 + wv * 0.15);
+        for (let s = 0; s <= 24; s++) {
+          const tx = s / 24;
+          const bVal = meter.bins[(s * 2 + wv * 7) % 48];
+          const wVal = meter.wave[(s * 5 + wv * 17) & 127];
+          const env = Math.sin(tx * Math.PI);
+          const x = w * (0.04 + tx * 0.92);
+          const y =
+            baseY +
+            Math.sin(tx * 4.2 + ph * (0.55 + wv * 0.15) + wv * 1.3) * h * 0.14 +
+            (bVal * 0.12 * (wv % 2 === 0 ? 1 : -1) + wVal * 0.08) * h * env;
+          pts.push({ x, y });
+        }
+        const grad = ctx.createLinearGradient(0, 0, w, 0);
+        grad.addColorStop(0, "rgba(0, 0, 0, 0)");
+        grad.addColorStop(0.25, hslColor(wv * 54 + 12, 0.16 + e * 0.12, 4));
+        grad.addColorStop(0.75, hslColor(wv * 54 + 125, 0.16 + e * 0.12, 6));
+        grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = minDim * (0.005 + b * 0.004);
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 0; i < pts.length - 1; i++) {
+          const mx = (pts[i].x + pts[i + 1].x) * 0.5;
+          const my = (pts[i].y + pts[i + 1].y) * 0.5;
+          ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+        }
+        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    applyFeedbackPass(w, h, 1.004, 0.002 * runtime.spinDir, isPlaying ? 0.22 : 0.28, 0, 0, 0.80);
+    ctx.globalCompositeOperation = "screen";
+
+    const isSpectrum = preset === "spectrum";
+    const hazeGrad = ctx.createRadialGradient(cx, cy, minDim * 0.08, cx, cy, minDim * 0.72);
+    hazeGrad.addColorStop(0, hslColor(isSpectrum ? 16 : -6, 0.04 + b * 0.04, -18));
+    hazeGrad.addColorStop(0.55, hslColor(isSpectrum ? 175 : 185, 0.035 + m * 0.03, -24));
+    hazeGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = hazeGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    const cloudPairs = 4;
+    for (let c = 0; c < cloudPairs; c++) {
+      const f = c / cloudPairs;
+      const bVal = meter.bins[(c * 10) % 48];
+      const ox = Math.sin(ph * (0.42 + c * 0.11) + c * 1.7) * w * (0.17 + f * 0.16);
+      const oy = Math.cos(ph * (0.37 + c * 0.09) + c * 2.4) * h * (0.15 + f * 0.14);
+      const rad = minDim * (0.14 + f * 0.12 + b * 0.06 + bVal * 0.05);
+      const hueA = isSpectrum ? c * 68 : -10 + c * 26;
+      const hueB = hueA + 165;
+
+      for (let mx = -1; mx <= 1; mx += 2) {
+        for (let my = -1; my <= 1; my += 2) {
+          const px = cx + ox * mx;
+          const py = cy + oy * my;
+          const cg = ctx.createRadialGradient(px, py, 0, px, py, rad);
+          cg.addColorStop(0, hslColor(mx > 0 ? hueA : hueB, 0.065 + e * 0.060, -6));
+          cg.addColorStop(0.5, hslColor(mx > 0 ? hueA + 18 : hueB - 14, 0.032 + bVal * 0.030, -18));
+          cg.addColorStop(1, "rgba(0, 0, 0, 0)");
+          ctx.fillStyle = cg;
+          ctx.beginPath();
+          ctx.arc(px, py, rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    const ribbonBand = ctx.createLinearGradient(0, cy - minDim * 0.05, 0, cy + minDim * 0.05);
+    ribbonBand.addColorStop(0, "rgba(0, 0, 0, 0)");
+    ribbonBand.addColorStop(0.5, hslColor(isSpectrum ? 35 : -4, 0.045 + e * 0.055, -4));
+    ribbonBand.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = ribbonBand;
+    ctx.fillRect(0, cy - minDim * 0.05, w, minDim * 0.10);
+
+    ctx.globalCompositeOperation = "source-over";
+    const softCenter = ctx.createRadialGradient(cx, cy, 0, cx, cy, minDim * 0.34);
+    softCenter.addColorStop(0, "rgba(8, 2, 10, 0.16)");
+    softCenter.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = softCenter;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function renderAmbience(w, h, dtSec, isPlaying, preset) {
+    ensureFxBuffer();
+    const minDim = Math.min(w, h);
+    const tp = runtime.tunnelPhase;
+    const ph = runtime.phase;
+    const dp = runtime.driftPhase;
+    const bassBoost = isPlaying ? meter.softBass : 0.12;
+    const midBoost = isPlaying ? meter.softEnergy : 0.10;
+    const satFrac = (config.rgbRotate ? Math.max(76, config.sat) : config.sat) * 0.01;
+    const baseHue = runtime.rotHue;
+
+    if (preset === "fire") {
+      for (let y = 0; y < FX_H; y++) {
+        const ny = y / (FX_H - 1);
+        const up = 1 - ny;
+        for (let x = 0; x < FX_W; x++) {
+          const i = y * FX_W + x;
+          const nx = fxNormX[i];
+          const tongue =
+            Math.sin(nx * 4.6 + ph * 1.1 + Math.sin(up * 4.0 - ph * 1.7) * 1.1) * 0.44 +
+            Math.cos(nx * 8.2 - tp * 1.8 + up * 5.2) * 0.30 +
+            Math.sin((nx * 2.8 - up * 6.8) + tp * 2.3) * 0.24;
+          const heat = Math.max(0, Math.min(1.1, (up * (0.88 + bassBoost * 0.38) + tongue * 0.24 - Math.abs(nx) * 0.36)));
+          const l = Math.min(0.58, Math.pow(heat, 1.65) * 0.52);
+          const hue = baseHue + heat * 42 - 22;
+          hslToRgb(hue, satFrac, l, rgbScratch);
+          fxU32[i] = (255 << 24) | (rgbScratch[2] << 16) | (rgbScratch[1] << 8) | rgbScratch[0];
+        }
+      }
+      flushFxToMain(w, h);
+    } else if (preset === "water") {
+      const s1x = Math.sin(dp * 0.6) * 0.45;
+      const s1y = Math.cos(dp * 0.8) * 0.35;
+      const s2x = Math.cos(dp * 0.5) * 0.52;
+      const s2y = Math.sin(dp * 0.7) * 0.42;
+      for (let i = 0; i < FX_W * FX_H; i++) {
+        const nx = fxNormX[i];
+        const ny = fxNormY[i];
+        const d1 = Math.sqrt((nx - s1x) * (nx - s1x) + (ny - s1y) * (ny - s1y));
+        const d2 = Math.sqrt((nx - s2x) * (nx - s2x) + (ny - s2y) * (ny - s2y));
+        const ripple = Math.sin(d1 * 14 - ph * 1.8) * 0.5 + Math.cos(d2 * 13 - ph * 1.5) * 0.5;
+        const caustic = Math.pow(Math.max(0, 0.52 + ripple * 0.48), 2.0) * (0.42 + bassBoost * 0.38);
+        const hue = baseHue + ripple * 48 + d1 * 26;
+        hslToRgb(hue, satFrac * 0.88, Math.min(0.60, 0.08 + caustic * 0.50), rgbScratch);
+        fxU32[i] = (255 << 24) | (rgbScratch[2] << 16) | (rgbScratch[1] << 8) | rgbScratch[0];
+      }
+      flushFxToMain(w, h);
+    } else {
+      for (let i = 0; i < FX_W * FX_H; i++) {
+        const d = fxDist[i];
+        const a = fxAng[i];
+        const nx = fxNormX[i];
+        const ny = fxNormY[i];
+
+        const warp =
+          Math.sin(a * 3 + dp * 0.9) * (0.11 + midBoost * 0.08) +
+          Math.cos(a * 5 - ph * 0.55) * (0.06 + bassBoost * 0.04) +
+          Math.sin(nx * 4.2 + ny * 3.8 + tp * 0.8) * 0.07 +
+          Math.cos(nx * 7.4 - ny * 6.8 - ph * 0.75) * 0.04;
+
+        const voidEdge = 0.22 + warp * 0.48 - bassBoost * 0.025;
+        if (d <= voidEdge * 0.78) {
+          fxU32[i] = 0xff000000;
+          continue;
+        }
+
+        const radialWave = Math.sin((d + warp) * 11.5 - tp * 3.1);
+        const cloudRipple = Math.cos((d - warp * 0.65) * 18.0 - ph * 1.6 + Math.sin(a * 4 + dp * 0.8) * 1.4);
+        const fineGrain = Math.sin(nx * 10.5 + ny * 9.0 - tp * 1.2) * 0.14;
+        const ringMix = Math.max(0, 0.46 + 0.32 * radialWave + 0.20 * cloudRipple + fineGrain);
+        const contrasted = Math.pow(ringMix, 1.75);
+
+        let edgeFade = (d - voidEdge * 0.78) / 0.19;
+        if (edgeFade < 0) edgeFade = 0;
+        if (edgeFade > 1) edgeFade = 1;
+        let outerFade = 1 - Math.max(0, (d - 0.85) / 0.75);
+        if (outerFade < 0) outerFade = 0;
+
+        const lum = Math.max(0, Math.min(0.54, edgeFade * outerFade * (0.02 + contrasted * (0.40 + bassBoost * 0.22))));
+        const hue = baseHue + radialWave * 48 + cloudRipple * 28 + d * 36;
+        hslToRgb(hue, satFrac * 0.88, lum, rgbScratch);
+        fxU32[i] = (255 << 24) | (rgbScratch[2] << 16) | (rgbScratch[1] << 8) | rgbScratch[0];
+      }
+      flushFxToMain(w, h);
+    }
+  }
+
+  function renderBarsAndWaves(w, h, dtSec, isPlaying, preset) {
+    if (preset === "mist") {
+      applyFeedbackPass(w, h, 1.012, 0, isPlaying ? 0.14 : 0.24, 0, isPlaying ? 0.012 : 0.003, 0.88);
+      ctx.globalCompositeOperation = "lighter";
+      const cy = h * 0.5;
+      for (let pass = 0; pass < 2; pass++) {
+        const sign = pass === 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.lineWidth = 2.6 + meter.bass * 1.6;
+        ctx.strokeStyle = hslColor(pass * 38, 0.86, pass === 0 ? 22 : 12);
+        for (let i = 0; i < 128; i++) {
+          const px = (i / 127) * w;
+          const b = meter.bins[(i * 47) >> 7];
+          const env = Math.sin((i / 127) * Math.PI);
+          const y = cy + sign * (b * h * (0.28 + meter.bass * 0.14) * env + meter.wave[i] * h * 0.11);
+          if (i === 0) ctx.moveTo(px, y);
+          else ctx.lineTo(px, y);
+        }
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = runtime.surfaceMode || runtime.isFullscreen ? "#000000" : "rgba(5, 1, 2, 0.86)";
+    ctx.fillRect(0, 0, w, h);
+
+    if (preset === "scope") {
+      const cy = h * 0.5;
+      const padX = Math.max(12, w * 0.025);
+      const uw = w - padX * 2;
+      ctx.strokeStyle = hslColor(0, 0.22, -16);
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(padX, cy);
-      ctx.lineTo(padX + usableW, cy);
+      ctx.lineTo(padX + uw, cy);
       ctx.stroke();
-    }
 
-    const segStep = 6;
-    for (let i = 0; i < barCount; i++) {
-      const val = meter.bins[i];
-      const peakVal = meter.peaks[i];
-      const x = padX + i * slotW + (slotW - barW) * 0.5;
-      const barH = Math.max(4, val * maxBarH);
-      const peakYOff = peakVal * maxBarH;
-
-      const grad = ctx.createLinearGradient(x, cy - barH, x, cy + barH);
-      grad.addColorStop(0, hslColor(i * 4.2 + 24, 0.95, 30));
-      grad.addColorStop(0.5, hslColor(i * 2.5, 0.80, 6));
-      grad.addColorStop(1, hslColor(i * 4.2 + 24, 0.95, 30));
-
-      ctx.fillStyle = grad;
-      const numSegs = Math.max(1, Math.floor(barH / segStep));
-      for (let s = 0; s < numSegs; s++) {
-        const yOff = s * segStep;
-        ctx.fillRect(x, cy - yOff - 4, barW, 4);
-        ctx.fillRect(x, cy + yOff + 1, barW, 4);
+      ctx.globalCompositeOperation = "lighter";
+      for (let pass = 0; pass < 3; pass++) {
+        ctx.beginPath();
+        ctx.lineWidth = pass === 0 ? 6.5 : pass === 1 ? 2.8 : 1.1;
+        ctx.strokeStyle = hslColor(pass === 2 ? 24 : 0, pass === 0 ? 0.26 : pass === 1 ? 0.85 : 0.98, pass === 2 ? 44 : 18);
+        const amp = h * (0.14 + meter.energy * 0.18 + meter.kick * 0.05);
+        for (let i = 0; i < 128; i++) {
+          const px = padX + (i / 127) * uw;
+          const py = cy + meter.wave[i] * amp;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
       }
-
-      ctx.fillStyle = hslColor(i * 4 + 35, 1.0, 42);
-      ctx.fillRect(x, cy - peakYOff - 4, barW, 3);
-      ctx.fillRect(x, cy + peakYOff + 1, barW, 3);
-    }
-
-    for (let pass = 0; pass < 2; pass++) {
       ctx.beginPath();
-      ctx.lineWidth = pass === 0 ? 3.8 : 1.3;
-      ctx.strokeStyle = hslColor(pass === 0 ? 8 : 22, pass === 0 ? 0.62 : 0.98, pass === 0 ? 16 : 42);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = hslColor(55, 0.72, 26);
+      const ampB = h * (0.10 + meter.high * 0.14);
       for (let i = 0; i < 128; i++) {
-        const x = padX + (i / 127) * usableW;
-        const amp = h * (0.095 + meter.energy * 0.14 + meter.kick * 0.045);
-        const y = cy + meter.wave[i] * amp;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const px = padX + (i / 127) * uw;
+        const py = cy + meter.waveB[i] * ampB;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       }
       ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
+      return;
     }
 
-    ctx.beginPath();
-    ctx.lineWidth = 1.6;
-    ctx.strokeStyle = hslColor(62, 0.82, 28);
-    for (let i = 0; i < 128; i++) {
-      const x = padX + (i / 127) * usableW;
-      const y = cy + meter.waveB[i] * h * (0.075 + meter.high * 0.10 + meter.snare * 0.04);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+    const barCount = 32;
+    const padX = Math.max(8, w * 0.018);
+    const floorY = h - Math.max(10, h * 0.032);
+    const maxH = h * 0.82;
+    const slotW = (w - padX * 2) / barCount;
+    const gap = Math.max(2, Math.floor(slotW * 0.14));
+    const barW = Math.max(3, slotW - gap);
+    const capH = Math.max(3, Math.min(6, Math.round(h * 0.009)));
 
-    stepAndDrawSparks(dtSec, cx, cy, minDim, 0);
+    for (let i = 0; i < barCount; i++) {
+      const val = meter.bins32[i];
+      const peakVal = meter.peaks32[i];
+      const bx = Math.round(padX + i * slotW + gap * 0.5);
+      const bh = Math.max(3, Math.round(val * maxH));
+      const by = floorY - bh;
+
+      const barGrad = ctx.createLinearGradient(0, by, 0, floorY);
+      barGrad.addColorStop(0, hslColor(i * 2.2 + 12, 1.0, 26));
+      barGrad.addColorStop(0.55, hslColor(i * 1.4, 0.96, 4));
+      barGrad.addColorStop(1, hslColor(-14, 0.92, -22));
+      ctx.fillStyle = barGrad;
+      ctx.fillRect(bx, by, barW, bh);
+
+      const peakY = Math.min(floorY - capH, Math.round(floorY - Math.max(bh + capH + 2, peakVal * maxH)));
+      ctx.fillStyle = hslColor(i * 2.2 + 24, 1.0, 42);
+      ctx.fillRect(bx, peakY, barW, capH);
+    }
+  }
+
+  function renderBattery(w, h, dtSec, isPlaying, preset) {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const minDim = Math.min(w, h);
+
+    if (preset === "smokewater" || preset === "brightsphere") {
+      ensureFxBuffer();
+      const ph = runtime.driftPhase * 0.95;
+      const tp = runtime.tunnelPhase * 0.62;
+      const satFrac = (config.rgbRotate ? Math.max(74, config.sat) : config.sat) * 0.01;
+      const baseHue = runtime.rotHue;
+      const e = isPlaying ? meter.softEnergy : 0.14;
+
+      for (let i = 0; i < FX_W * FX_H; i++) {
+        const nx = fxNormX[i];
+        const ny = fxNormY[i];
+        const d = fxDist[i];
+        const wx = nx * 2.8 + Math.sin(ny * 2.5 + ph * 0.62) * 1.15;
+        const wy = ny * 2.8 + Math.cos(nx * 2.3 - tp * 0.54) * 1.15;
+        const swirl =
+          Math.sin(wx + Math.cos(wy * 1.35 + ph * 0.48) * 1.12) * 0.54 +
+          Math.cos(wy - Math.sin(wx * 1.25 - tp * 0.44) * 1.08) * 0.50 +
+          Math.sin((wx - wy) * 0.92 + ph * 0.36) * 0.36;
+        const nrm = Math.max(0, 0.5 + swirl * 0.25);
+        const hue = preset === "smokewater" ? baseHue + 150 + swirl * 34 : baseHue + swirl * 44 + (nx + ny) * 26;
+        const glow = preset === "smokewater"
+          ? Math.max(0.03, Math.min(0.48, Math.pow(nrm, 1.35) * (0.36 + e * 0.26)))
+          : Math.max(0.02, Math.min(0.46, Math.pow(nrm, 1.40) * (0.35 + e * 0.28) * Math.max(0.28, 1.05 - Math.max(0, d - 0.55) * 0.55)));
+        hslToRgb(hue, satFrac, glow, rgbScratch);
+        fxU32[i] = (255 << 24) | (rgbScratch[2] << 16) | (rgbScratch[1] << 8) | rgbScratch[0];
+      }
+      flushFxToMain(w, h);
+
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      if (preset === "brightsphere") {
+        for (let c = 0; c < 3; c++) {
+          const ax = cx + Math.sin(ph * (0.44 + c * 0.16) + c * 2.2) * w * 0.24;
+          const ay = cy + Math.cos(ph * (0.36 + c * 0.12) + c * 1.5) * h * 0.22;
+          const rad = minDim * (0.28 + c * 0.08 + meter.softBass * 0.10);
+          const ag = ctx.createRadialGradient(ax, ay, 0, ax, ay, rad);
+          ag.addColorStop(0, hslColor(c * 72 + 12, 0.08 + e * 0.06, 6));
+          ag.addColorStop(0.55, hslColor(c * 72 + 44, 0.035 + e * 0.03, -8));
+          ag.addColorStop(1, "rgba(0, 0, 0, 0)");
+          ctx.fillStyle = ag;
+          ctx.beginPath();
+          ctx.arc(ax, ay, rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        for (let wv = 0; wv < 3; wv++) {
+          const yBase = h * (0.28 + wv * 0.22);
+          ctx.beginPath();
+          for (let s = 0; s <= 24; s++) {
+            const tx = s / 24;
+            const sx = tx * w;
+            const sy = yBase + Math.sin(tx * 4.6 + ph * (0.65 + wv * 0.18) + wv * 1.6) * h * (0.06 + meter.softBass * 0.045);
+            if (s === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+          }
+          ctx.lineWidth = minDim * 0.048;
+          ctx.strokeStyle = hslColor(150 + wv * 34, 0.065 + meter.softEnergy * 0.04, 4);
+          ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    if (preset === "whirlpool") {
+      const zoom = isPlaying ? (1.028 + meter.softBass * 0.036) : 1.008;
+      const rot = isPlaying ? ((0.028 + meter.softEnergy * 0.038) * runtime.spinDir) : 0.006;
+      applyFeedbackPass(w, h, zoom, rot, isPlaying ? 0.14 : 0.22, 0, 0, 0.89);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      const arms = 6;
+      const steps = 128;
+      const maxR = minDim * 0.49;
+      for (let a = 0; a < arms; a++) {
+        const baseA = (a / arms) * Math.PI * 2 + runtime.spiralPhase;
+        for (let pass = 0; pass < 2; pass++) {
+          ctx.beginPath();
+          ctx.lineWidth = pass === 0 ? 7.0 : 2.2;
+          ctx.strokeStyle = hslColor(a * 48 + pass * 14, pass === 0 ? 0.16 : 0.54, pass === 0 ? 12 : 20);
+          for (let s = 0; s < steps; s++) {
+            const t = s / (steps - 1);
+            const bIdx = Math.floor(t * 47);
+            const b = (meter.bins[Math.max(0, bIdx - 1)] + meter.bins[bIdx] * 2 + meter.bins[Math.min(47, bIdx + 1)]) * 0.25;
+            const wIdx = Math.floor(t * 127);
+            const wv = (meter.wave[(wIdx - 1) & 127] + meter.wave[wIdx] * 2 + meter.wave[(wIdx + 1) & 127]) * 0.25;
+            const r = t * maxR * (0.88 + meter.softBass * 0.18);
+            const th = baseA + t * (5.2 + meter.mid * 1.8) * runtime.spinDir + Math.sin(t * 10 - runtime.phase * 1.2) * 0.18;
+            const x = cx + Math.cos(th) * (r + b * 24 + wv * 10);
+            const y = cy + Math.sin(th) * (r + b * 24 + wv * 10);
+            if (s === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    applyFeedbackPass(w, h, isPlaying ? (1.028 + meter.softBass * 0.030) : 1.008, isPlaying ? (0.010 * runtime.spinDir) : 0.002, 0.22, 0, 0, 0.86);
+    ctx.globalCompositeOperation = "screen";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const bolts = 10;
+    for (let b = 0; b < bolts; b++) {
+      const segs = 14;
+      const baseAng = (b / bolts) * Math.PI * 2 + runtime.phase * 0.34 * (b % 2 ? 1 : -1);
+      const reach = minDim * (0.28 + meter.bins[(b * 4) % 48] * 0.22 + meter.softBass * 0.09);
+      const pts = [];
+      for (let s = 1; s <= segs; s++) {
+        const t = s / segs;
+        const wi = (b * 13 + s * 6) & 127;
+        const j = ((meter.wave[(wi - 1) & 127] + meter.wave[wi] * 2 + meter.wave[(wi + 1) & 127]) * 0.25) * (0.16 + meter.snare * 0.12);
+        const curAng = baseAng + j;
+        pts.push({
+          x: cx + Math.cos(curAng) * reach * t,
+          y: cy + Math.sin(curAng) * reach * t
+        });
+      }
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        for (let s = 0; s < pts.length - 1; s++) {
+          const mx = (pts[s].x + pts[s + 1].x) * 0.5;
+          const my = (pts[s].y + pts[s + 1].y) * 0.5;
+          ctx.quadraticCurveTo(pts[s].x, pts[s].y, mx, my);
+        }
+        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+        ctx.lineWidth = pass === 0 ? 6.2 : 2.0;
+        ctx.strokeStyle = hslColor(b * 36 + 18, pass === 0 ? 0.16 : 0.48, pass === 0 ? 8 : 18);
+        ctx.stroke();
+      }
+    }
     ctx.globalCompositeOperation = "source-over";
   }
 
-  function renderCyber(w, h, dtSec, isPlaying) {
+  function drawSmoothCurve(pts, closed) {
+    if (!pts || pts.length < 2) return;
+    ctx.beginPath();
+    if (closed) {
+      const n = pts.length;
+      const startMx = (pts[n - 1].x + pts[0].x) * 0.5;
+      const startMy = (pts[n - 1].y + pts[0].y) * 0.5;
+      ctx.moveTo(startMx, startMy);
+      for (let i = 0; i < n; i++) {
+        const next = pts[(i + 1) % n];
+        const mx = (pts[i].x + next.x) * 0.5;
+        const my = (pts[i].y + next.y) * 0.5;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      ctx.closePath();
+    } else {
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i + 1].x) * 0.5;
+        const my = (pts[i].y + pts[i + 1].y) * 0.5;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    }
+  }
+
+  function project3dPoint(lx, ly, lz, cx, cy, scaleXY, cyw, syw, cp, sp, cr, sr, fov) {
+    const x1 = lx * cyw - lz * syw;
+    const z1 = lx * syw + lz * cyw;
+    const y2 = ly * cp - z1 * sp;
+    const z2 = ly * sp + z1 * cp;
+    const xr = x1 * cr - y2 * sr;
+    const yr = x1 * sr + y2 * cr;
+    const depth = fov + z2;
+    if (depth <= 0.25) return null;
+    const pScale = fov / depth;
+    return {
+      x: cx + xr * scaleXY * pScale,
+      y: cy + yr * scaleXY * pScale,
+      s: pScale
+    };
+  }
+
+  function renderParticle(w, h, dtSec, isPlaying, preset) {
+    const cx = w * 0.5;
+    const cy = h * 0.5;
     const minDim = Math.min(w, h);
-    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w * 0.6 : 0);
-    const horizonY = h * 0.48;
-    const orbY = horizonY - minDim * 0.05;
+    const e = isPlaying ? meter.softEnergy : 0.14;
+    const b = isPlaying ? meter.softBass : 0.12;
+    const ph = runtime.driftPhase;
 
-    ctx.fillStyle = "rgba(6, 1, 3, 0.34)";
-    ctx.fillRect(0, 0, w, h);
+    if (preset === "aurora") {
+      applyFeedbackPass(w, h, 1.003, 0, isPlaying ? 0.14 : 0.22, 0, -0.008, 0.88);
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      const curtains = 4;
+      const cols = 36;
+      for (let c = 0; c < curtains; c++) {
+        const yBase = h * (0.40 + c * 0.14);
+        const pts = [];
+        const ribbonH = h * (0.24 + (3 - c) * 0.04 + b * 0.12);
+        for (let s = 0; s <= cols; s++) {
+          const tx = s / cols;
+          const bVal = meter.bins[(s + c * 9) % 48];
+          const wVal = meter.wave[(s * 3 + c * 23) & 127];
+          const px = w * (-0.04 + tx * 1.08);
+          const py = yBase + Math.sin(tx * 4.4 + ph * (0.48 + c * 0.12) + c * 1.7) * h * 0.08 + wVal * h * 0.045 - bVal * h * 0.06;
+          pts.push({ x: px, y: py, h: ribbonH * (0.65 + bVal * 0.55) });
+        }
+        const aurGrad = ctx.createLinearGradient(0, yBase - ribbonH, 0, yBase + h * 0.12);
+        aurGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
+        aurGrad.addColorStop(0.55, hslColor(135 + c * 42, 0.095 + e * 0.065, 2));
+        aurGrad.addColorStop(0.88, hslColor(175 + c * 38, 0.16 + e * 0.09, 10));
+        aurGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
 
-    ctx.save();
-    ctx.strokeStyle = hslColor(-8, 0.62 + meter.energy * 0.25, 10);
-    ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let s = 0; s < pts.length - 1; s++) {
+          const mx = (pts[s].x + pts[s + 1].x) * 0.5;
+          const my = (pts[s].y + pts[s + 1].y) * 0.5;
+          ctx.quadraticCurveTo(pts[s].x, pts[s].y, mx, my);
+        }
+        for (let s = pts.length - 1; s >= 0; s--) {
+          ctx.lineTo(pts[s].x, pts[s].y - pts[s].h);
+        }
+        ctx.closePath();
+        ctx.fillStyle = aurGrad;
+        ctx.fill();
 
-    const gridCols = 22;
-    for (let i = -gridCols; i <= gridCols; i++) {
-      const xTop = cx + i * (w * 0.015);
-      const xBot = cx + i * (w * 0.082);
-      ctx.beginPath();
-      ctx.moveTo(xTop, horizonY);
-      ctx.lineTo(xBot, h);
-      ctx.stroke();
+        drawSmoothCurve(pts, false);
+        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = hslColor(145 + c * 36, 0.22 + e * 0.14, 14);
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
     }
 
-    const zLines = 14;
-    const zScroll = (runtime.tunnelPhase * 0.92) % 1;
-    for (let i = 0; i < zLines; i++) {
-      const frac = Math.pow((i + zScroll) / zLines, 2.3);
-      const y = horizonY + frac * (h - horizonY);
-      ctx.strokeStyle = hslColor(i * 3, 0.45 + frac * 0.45, 10 + meter.beatPulse * 14);
-      ctx.lineWidth = 1 + frac * 1.4;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
+    if (preset === "fountain") {
+      applyFeedbackPass(w, h, 1.008, 0, isPlaying ? 0.15 : 0.24, 0, 0, 0.88);
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      const yaw = runtime.spiralPhase * 0.42;
+      const pitch = 0.28 + Math.sin(ph * 0.35) * 0.10;
+      const roll = Math.sin(ph * 0.24) * 0.08;
+      const cyw = Math.cos(yaw), syw = Math.sin(yaw);
+      const cp = Math.cos(pitch), sp = Math.sin(pitch);
+      const cr = Math.cos(roll), sr = Math.sin(roll);
+      const scaleXY = minDim * (0.64 + b * 0.14);
+      const baseCy = cy + minDim * 0.06;
+      const fov = 2.5;
+      const streams = 180;
+
+      for (let i = 0; i < streams; i++) {
+        const life = (runtime.tunnelPhase * 0.44 + ptSeed[i]) % 1;
+        const lifePrev = Math.max(0, life - 0.045);
+        const ang = ptA[i];
+        const vRad = 0.34 + ptR[i] * 0.72;
+        const arcH = 0.96 + meter.bins[i % 48] * 0.34 + b * 0.44;
+
+        const pNow = project3dPoint(
+          Math.cos(ang) * vRad * life,
+          0.74 - (2.42 * life - 1.88 * life * life) * arcH,
+          Math.sin(ang) * vRad * life,
+          cx, baseCy, scaleXY, cyw, syw, cp, sp, cr, sr, fov
+        );
+        const pOld = project3dPoint(
+          Math.cos(ang) * vRad * lifePrev,
+          0.74 - (2.42 * lifePrev - 1.88 * lifePrev * lifePrev) * arcH,
+          Math.sin(ang) * vRad * lifePrev,
+          cx, baseCy, scaleXY, cyw, syw, cp, sp, cr, sr, fov
+        );
+        if (!pNow || !pOld) continue;
+
+        const env = Math.sin(life * Math.PI);
+        const alpha = env * (0.38 + e * 0.32);
+        const hue = (i % 48) * 6.5 + life * 45;
+        ctx.strokeStyle = hslColor(hue, alpha * 0.28, 6);
+        ctx.lineWidth = Math.max(2.6, pNow.s * (4.4 + e * 1.8));
+        ctx.beginPath();
+        ctx.moveTo(pOld.x, pOld.y);
+        ctx.lineTo(pNow.x, pNow.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = hslColor(hue, alpha, 14 + life * 12);
+        ctx.lineWidth = Math.max(1.2, pNow.s * (1.8 + e * 1.0));
+        ctx.beginPath();
+        ctx.moveTo(pOld.x, pOld.y);
+        ctx.lineTo(pNow.x, pNow.y);
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
     }
 
-    ctx.globalCompositeOperation = "lighter";
+    applyFeedbackPass(w, h, 1.005, 0, isPlaying ? 0.18 : 0.26, 0, 0, 0.85);
+    ctx.globalCompositeOperation = "screen";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
-    ctx.beginPath();
-    ctx.moveTo(0, horizonY);
-    for (let i = 0; i < 48; i++) {
-      const px = (i / 47) * w;
-      const distCenter = Math.abs((i / 47) - 0.5) * 2;
-      const peakH = meter.bins[i] * h * (0.14 + distCenter * 0.16) * (0.75 + meter.bass * 0.45);
-      ctx.lineTo(px, horizonY - peakH);
+    const yaw = runtime.spiralPhase * 0.38;
+    const pitch = 0.62 + Math.sin(ph * 0.32) * 0.16;
+    const roll = 0.18 + Math.sin(ph * 0.26) * 0.12;
+    const cyw = Math.cos(yaw), syw = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const cr = Math.cos(roll), sr = Math.sin(roll);
+    const scaleXY = minDim * (0.48 + b * 0.08);
+    const fov = 2.6;
+    const rows = 14;
+    const cols = 22;
+
+    for (let r = 0; r < rows; r++) {
+      const rz = (r / (rows - 1) - 0.5) * 1.45;
+      const linePts = [];
+      for (let c = 0; c < cols; c++) {
+        const cx3 = (c / (cols - 1) - 0.5) * 1.65;
+        const dist = Math.sqrt(cx3 * cx3 + rz * rz);
+        const bVal = meter.bins[Math.floor((c / cols) * 47)];
+        const wVal = meter.wave[((c * 5 + r * 7) & 127)];
+        const ripple = Math.sin(dist * 5.8 - runtime.phase * 2.1) * (0.08 + b * 0.16);
+        const ly = ripple + bVal * (0.14 + e * 0.18) * Math.cos(rz * 1.6) + wVal * 0.08;
+        const pt = project3dPoint(cx3, -ly, rz, cx, cy, scaleXY, cyw, syw, cp, sp, cr, sr, fov);
+        if (pt) linePts.push(pt);
+      }
+      if (linePts.length < 2) continue;
+      for (let pass = 0; pass < 2; pass++) {
+        drawSmoothCurve(linePts, false);
+        ctx.lineWidth = pass === 0 ? 5.2 : 1.7;
+        ctx.strokeStyle = hslColor(r * 18 + pass * 14, pass === 0 ? (0.10 + e * 0.08) : (0.34 + e * 0.22), pass === 0 ? 4 : 16);
+        ctx.stroke();
+      }
     }
-    ctx.lineTo(w, horizonY);
-    ctx.strokeStyle = hslColor(-22, 0.9, 26);
-    ctx.lineWidth = 2.0;
-    ctx.stroke();
-
-    ctx.strokeStyle = hslColor(6, 0.96, 32);
-    ctx.lineWidth = 2.2 + meter.kick * 1.8;
-    ctx.beginPath();
-    ctx.moveTo(0, horizonY);
-    ctx.lineTo(w, horizonY);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.globalCompositeOperation = "lighter";
-    const orbR = minDim * (0.135 + meter.bass * 0.055 + meter.kick * 0.032);
-    const spokes = 48;
-
-    for (let i = 0; i < spokes; i++) {
-      const ang = (i / spokes) * Math.PI * 2 + runtime.phase * 0.35 * runtime.spinDir;
-      const bin = meter.bins[i];
-      const len = orbR + bin * minDim * (0.18 + meter.energy * 0.09);
-      const x1 = cx + Math.cos(ang) * (orbR * 0.82);
-      const y1 = orbY + Math.sin(ang) * (orbR * 0.82);
-      const x2 = cx + Math.cos(ang) * len;
-      const y2 = orbY + Math.sin(ang) * len;
-
-      ctx.strokeStyle = hslColor(i * 4.5, 0.92, 24);
-      ctx.lineWidth = 2.2 + bin * 1.6;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-
-    ctx.beginPath();
-    const orbitPts = 96;
-    const ringR = orbR * (1.28 + meter.mid * 0.16);
-    for (let i = 0; i <= orbitPts; i++) {
-      const ang = (i / orbitPts) * Math.PI * 2;
-      const wOff = meter.wave[i & 127] * minDim * (0.025 + meter.bass * 0.035);
-      const rx = cx + Math.cos(ang) * (ringR + wOff);
-      const ry = orbY + Math.sin(ang) * (ringR + wOff);
-      if (i === 0) ctx.moveTo(rx, ry);
-      else ctx.lineTo(rx, ry);
-    }
-    ctx.closePath();
-    ctx.strokeStyle = hslColor(30, 0.92, 34);
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-
-    const sunGrad = ctx.createLinearGradient(cx, orbY - orbR, cx, orbY + orbR);
-    sunGrad.addColorStop(0, hslColor(28, 0.96, 36));
-    sunGrad.addColorStop(0.55, hslColor(0, 0.82, 16));
-    sunGrad.addColorStop(1, hslColor(-22, 0.92, -4));
-    ctx.beginPath();
-    ctx.arc(cx, orbY, orbR * 0.78, 0, Math.PI * 2);
-    ctx.strokeStyle = hslColor(10, 0.98, 32);
-    ctx.lineWidth = 2.6;
-    ctx.stroke();
-    ctx.fillStyle = sunGrad;
-    ctx.globalAlpha = 0.34 + meter.bass * 0.28;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    stepAndDrawSparks(dtSec, cx, orbY, minDim, 0.7 * runtime.spinDir);
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderPlenoptic(w, h, dtSec, isPlaying, preset) {
+    const minDim = Math.min(w, h);
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const e = isPlaying ? meter.softEnergy : 0.14;
+    const b = isPlaying ? meter.softBass : 0.12;
+    const ph = runtime.driftPhase;
+
+    if (preset === "prism") {
+      applyFeedbackPass(w, h, isPlaying ? (1.022 + b * 0.024) : 1.006, isPlaying ? 0.009 * runtime.spinDir : 0.002, 0.14, 0, 0, 0.89);
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      const petals = 6;
+      const samples = 48;
+      const rings = 7;
+      for (let rIdx = 0; rIdx < rings; rIdx++) {
+        const prog = ((rIdx / rings) + runtime.tunnelPhase * 0.28) % 1;
+        const rad = minDim * (0.05 + Math.pow(prog, 1.45) * 0.54);
+        const rot = runtime.phase * 0.22 * (rIdx % 2 ? 1 : -1) + prog * 0.72;
+        const pts = [];
+        for (let s = 0; s < samples; s++) {
+          const ang = (s / samples) * Math.PI * 2 + rot;
+          const bVal = meter.bins[(s + rIdx * 5) % 48];
+          const lobe = 1 + Math.sin(ang * petals + ph * 0.65) * (0.12 + bVal * 0.14);
+          pts.push({
+            x: cx + Math.cos(ang) * rad * lobe,
+            y: cy + Math.sin(ang) * rad * lobe
+          });
+        }
+        for (let pass = 0; pass < 2; pass++) {
+          drawSmoothCurve(pts, true);
+          ctx.lineWidth = pass === 0 ? (6.4 + prog * 3.0) : (1.8 + prog * 1.2);
+          ctx.strokeStyle = hslColor(rIdx * 42 + pass * 16, Math.sin(prog * Math.PI) * (pass === 0 ? 0.14 : 0.42), pass === 0 ? 6 : 16);
+          ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    if (preset === "fractal") {
+      applyFeedbackPass(w, h, isPlaying ? (1.012 + b * 0.016) : 1.005, 0.005 * runtime.spinDir, 0.14, 0, 0, 0.88);
+      ctx.globalCompositeOperation = "screen";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      const loops = 2;
+      const samples = 72;
+      for (let l = 0; l < loops; l++) {
+        const pts = [];
+        const kA = l === 0 ? 3 : 4;
+        const kB = l === 0 ? 5 : 7;
+        const rot = runtime.phase * (0.24 + l * 0.12) * (l === 0 ? 1 : -1);
+        for (let s = 0; s < samples; s++) {
+          const ang = (s / samples) * Math.PI * 2;
+          const bVal = meter.bins[(s * 2 + l * 13) % 48];
+          const rr = minDim * (0.18 + b * 0.10 + bVal * 0.08);
+          const x =
+            cx +
+            Math.cos(ang * kA + rot) * rr * 0.62 +
+            Math.sin(ang * kB - ph * 0.85) * rr * 0.42;
+          const y =
+            cy +
+            Math.sin(ang * kA + rot) * rr * 0.62 +
+            Math.cos(ang * (kB - 2) + ph * 0.72) * rr * 0.42;
+          pts.push({ x, y });
+        }
+        for (let pass = 0; pass < 2; pass++) {
+          drawSmoothCurve(pts, true);
+          ctx.lineWidth = pass === 0 ? 6.8 : 1.9;
+          ctx.strokeStyle = hslColor(l * 140 + ph * 24, pass === 0 ? (0.12 + e * 0.08) : (0.36 + e * 0.20), pass === 0 ? 6 : 16);
+          ctx.stroke();
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    applyFeedbackPass(w, h, isPlaying ? (1.016 + b * 0.016) : 1.006, 0.003 * runtime.spinDir, isPlaying ? 0.09 : 0.16, 0, 0, 0.91);
+    ctx.globalCompositeOperation = "screen";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    const waveRings = 3;
+    const ptsCount = 48;
+    for (let r = 0; r < waveRings; r++) {
+      const exp = ((r / waveRings) + runtime.tunnelPhase * 0.24) % 1;
+      const baseR = minDim * (0.08 + exp * 0.34) * (0.92 + b * 0.14);
+      const pts = [];
+      for (let i = 0; i < ptsCount; i++) {
+        const ang = (i / ptsCount) * Math.PI * 2 + ph * (0.28 + r * 0.1) * (r % 2 ? -1 : 1);
+        const wIdx = Math.floor((i / ptsCount) * 128 + r * 31) & 127;
+        const smoothWv = (meter.wave[(wIdx - 2) & 127] + meter.wave[(wIdx - 1) & 127] * 2 + meter.wave[wIdx] * 3 + meter.wave[(wIdx + 1) & 127] * 2 + meter.wave[(wIdx + 2) & 127]) / 9;
+        const binMod = meter.bins[(i + r * 11) % 48];
+        const rad = Math.max(12, baseR + smoothWv * minDim * 0.055 + binMod * minDim * 0.045);
+        pts.push({
+          x: cx + Math.cos(ang) * rad,
+          y: cy + Math.sin(ang) * rad
+        });
+      }
+      const envAlpha = Math.sin(exp * Math.PI);
+      for (let pass = 0; pass < 2; pass++) {
+        drawSmoothCurve(pts, true);
+        ctx.lineWidth = pass === 0 ? 11.5 : 2.6;
+        ctx.strokeStyle = hslColor(r * 95 + ph * 18, envAlpha * (pass === 0 ? 0.14 : 0.36), pass === 0 ? 4 : 16);
+        ctx.stroke();
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function renderSpikes(w, h, dtSec, isPlaying, preset) {
+    const cx = w * 0.5 + (isPlaying ? meter.shakeX * w * 0.5 : 0);
+    const cy = h * 0.5 + (isPlaying ? meter.shakeY * h * 0.5 : 0);
+    const minDim = Math.min(w, h);
+    const maxDim = Math.max(w, h);
+
+    const zoom = isPlaying ? (1.030 + meter.softBass * 0.032) : 1.008;
+    const twist = isPlaying && preset === "corona" ? 0.015 * runtime.spinDir : 0;
+    applyFeedbackPass(w, h, zoom, twist, isPlaying ? 0.26 : 0.32, 0, 0, 0.82);
+    ctx.globalCompositeOperation = "screen";
+
+    const folds = 8;
+    const raysPerHalf = 5;
+    const sectorAng = Math.PI * 2 / folds;
+    const spinBase = preset === "crossfire" ? runtime.phase * 0.22 : Math.sin(runtime.driftPhase * 0.55) * 0.14;
+
+    for (let f = 0; f < folds; f++) {
+      const fBase = f * sectorAng + spinBase;
+      for (let m = -1; m <= 1; m += 2) {
+        for (let r = 0; r < raysPerHalf; r++) {
+          const frac = (r + 0.35) / raysPerHalf;
+          const bIdx = (r * 7 + f * 3) % 48;
+          const bVal = meter.bins[bIdx];
+          const wVal = Math.abs(meter.wave[(r * 19 + f * 11) & 127]);
+          const ang = fBase + m * frac * (sectorAng * 0.48);
+          const len = maxDim * (0.15 + bVal * 0.32 + wVal * 0.09 + meter.softBass * 0.12);
+          const spread = 0.028 + (1 - frac) * 0.028;
+          const rCore = minDim * (0.048 + meter.softBass * 0.018);
+
+          const x0 = cx + Math.cos(ang - spread) * rCore;
+          const y0 = cy + Math.sin(ang - spread) * rCore;
+          const x1 = cx + Math.cos(ang + spread) * rCore;
+          const y1 = cy + Math.sin(ang + spread) * rCore;
+          const xTip = cx + Math.cos(ang) * len;
+          const yTip = cy + Math.sin(ang) * len;
+
+          const spGrad = ctx.createLinearGradient(cx + Math.cos(ang) * rCore, cy + Math.sin(ang) * rCore, xTip, yTip);
+          spGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
+          spGrad.addColorStop(0.18, hslColor(r * 24 + 10, 0.22, 6));
+          spGrad.addColorStop(0.48, hslColor(r * 28 + 14, 0.28, 10));
+          spGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+          ctx.fillStyle = spGrad;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(xTip, yTip);
+          ctx.lineTo(x1, y1);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+
+    if (preset === "crossfire") {
+      const rings = 3;
+      for (let i = 0; i < rings; i++) {
+        const rr = minDim * (0.11 + i * 0.12 + meter.softBass * 0.035);
+        ctx.strokeStyle = hslColor(i * 42, 0.18, 10);
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+    const aperture = ctx.createRadialGradient(cx, cy, 0, cx, cy, minDim * 0.085);
+    aperture.addColorStop(0, "rgba(0, 0, 0, 0.42)");
+    aperture.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = aperture;
+    ctx.beginPath();
+    ctx.arc(cx, cy, minDim * 0.085, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function getMainViewContainer() {
@@ -1439,10 +2281,25 @@
     return { left: 0, top: 64, width: window.innerWidth, height: Math.max(200, window.innerHeight - 154) };
   }
 
+  function getStageCanvasRect(hostRect) {
+    if (runtime.isFullscreen || document.fullscreenElement) {
+      return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    }
+    if (runtime.surfaceMode) {
+      return {
+        left: hostRect.left + 2,
+        top: hostRect.top + 2,
+        width: Math.max(120, hostRect.width - 4),
+        height: Math.max(120, hostRect.height - 58)
+      };
+    }
+    return hostRect;
+  }
+
   function syncCanvasSize(rect) {
     if (!canvas || !ctx) return;
     const mainView = getMainViewContainer();
-    const mountInMainView = !runtime.surfaceMode && !runtime.isFullscreen && !document.fullscreenElement && !!mainView;
+    const mountInMainView = !runtime.surfaceMode && !!mainView;
     const targetParent = mountInMainView ? mainView : document.body;
 
     if (canvas.parentNode !== targetParent) {
@@ -1501,7 +2358,8 @@
     const dtSec = runtime.lastFrameMs > 0 ? Math.min(0.05, Math.max(0.001, (nowMs - runtime.lastFrameMs) / 1000)) : 0.016;
     runtime.lastFrameMs = nowMs;
 
-    const rect = getHostContainerRect();
+    const hostRect = getHostContainerRect();
+    const rect = getStageCanvasRect(hostRect);
     syncCanvasSize(rect);
 
     const w = rect.width;
@@ -1517,18 +2375,22 @@
       beatLedEl.style.boxShadow = isPlaying && meter.beatPulse > 0.25 ? `0 0 ${Math.round(8 + meter.beatPulse * 10)}px ${hslColor(0, 0.9, 18)}` : "none";
     }
 
-    if (config.model === "tunnel") renderTunnel(w, h, dtSec, isPlaying);
-    else if (config.model === "spiral") renderSpiral(w, h, dtSec, isPlaying);
-    else if (config.model === "starburst") renderStarburst(w, h, dtSec, isPlaying);
-    else if (config.model === "scope") renderScope(w, h, dtSec, isPlaying);
-    else renderCyber(w, h, dtSec, isPlaying);
+    if (config.model === "none") renderNoViz(w, h);
+    else if (config.model === "album") renderAlbumArt(w, h, dtSec, isPlaying);
+    else if (config.model === "alchemy") renderAlchemy(w, h, dtSec, isPlaying, config.preset);
+    else if (config.model === "ambience") renderAmbience(w, h, dtSec, isPlaying, config.preset);
+    else if (config.model === "bars") renderBarsAndWaves(w, h, dtSec, isPlaying, config.preset);
+    else if (config.model === "battery") renderBattery(w, h, dtSec, isPlaying, config.preset);
+    else if (config.model === "particle") renderParticle(w, h, dtSec, isPlaying, config.preset);
+    else if (config.model === "plenoptic") renderPlenoptic(w, h, dtSec, isPlaying, config.preset);
+    else renderSpikes(w, h, dtSec, isPlaying, config.preset);
 
     runtime.rafId = requestAnimationFrame(renderLoop);
   }
 
   function ensureRenderLoopState() {
     if (runtime.visualActive && !document.hidden) {
-      syncCanvasSize(getHostContainerRect());
+      syncCanvasSize(getStageCanvasRect(getHostContainerRect()));
       setStyleSafe(canvas, "display", "block");
       setStyleSafe(canvas, "opacity", runtime.surfaceMode || runtime.isFullscreen ? "1" : "0.78");
       if (!runtime.rafId) {
@@ -1589,11 +2451,10 @@
 
   function updateWheelMarker() {
     if (!wheelMarker || !wheelCanvas) return;
-    const r = wheelCanvas.width / 2;
     const rad = (config.hue * Math.PI) / 180;
-    const dist = (config.sat / 100) * (r - 2);
-    wheelMarker.style.left = `${(r + Math.cos(rad) * dist).toFixed(1)}px`;
-    wheelMarker.style.top = `${(r + Math.sin(rad) * dist).toFixed(1)}px`;
+    const pct = (config.sat / 100) * 42;
+    wheelMarker.style.left = `${(50 + Math.cos(rad) * pct).toFixed(1)}%`;
+    wheelMarker.style.top = `${(50 + Math.sin(rad) * pct).toFixed(1)}%`;
   }
 
   function pickColorFromWheelEvent(ev) {
@@ -1635,16 +2496,252 @@
     }
   }
 
+  function getAllPresetPairs() {
+    const out = [];
+    for (let i = 0; i < MODELS.length; i++) {
+      const m = MODELS[i];
+      for (let j = 0; j < m.presets.length; j++) {
+        out.push({
+          modelId: m.id,
+          modelLabel: m.label,
+          presetId: m.presets[j].id,
+          presetLabel: m.presets[j].label
+        });
+      }
+    }
+    return out;
+  }
+
+  function getActivePresetDisplayLabel() {
+    const def = getModelDef(config.model);
+    if (def.id === "none" || def.id === "album") {
+      return def.label;
+    }
+    let pLabel = def.presets[0].label;
+    for (let i = 0; i < def.presets.length; i++) {
+      if (def.presets[i].id === config.preset) {
+        pLabel = def.presets[i].label;
+        break;
+      }
+    }
+    return `${def.label} : ${pLabel}`;
+  }
+
+  function syncVizSelectionUi() {
+    const modelsWrap = document.getElementById("wmp-hud-models");
+    if (modelsWrap) {
+      modelsWrap.querySelectorAll(".wmp-model-btn").forEach((el) => {
+        el.classList.toggle("active", el.dataset.modelId === config.model);
+      });
+    }
+
+    setTextSafe(presetLabelEl, getActivePresetDisplayLabel());
+
+    if (popupMenuEl) {
+      popupMenuEl.querySelectorAll(".wmp-menu-cat-group").forEach((grp) => {
+        const isCat = grp.dataset.modelId === config.model;
+        grp.classList.toggle("active", isCat);
+        const item = grp.querySelector(".wmp-menu-item");
+        if (item) {
+          item.classList.toggle("active", isCat);
+          const sub = item.querySelector(".wmp-menu-sub");
+          if (sub && isCat) {
+            const def = getModelDef(config.model);
+            const found = def.presets.find((p) => p.id === config.preset);
+            setTextSafe(sub, found ? found.label : def.presets[0].label);
+          }
+        }
+        grp.querySelectorAll(".wmp-preset-chip").forEach((chip) => {
+          chip.classList.toggle("active", isCat && chip.dataset.presetId === config.preset);
+        });
+      });
+    }
+  }
+
+  function selectModelPreset(modelId, presetId) {
+    const resolved = resolveModelAndPreset(modelId, presetId);
+    config.model = resolved.model;
+    config.preset = resolved.preset;
+    writeStore(STORE_KEYS.model, config.model);
+    writeStore(STORE_KEYS.preset, config.preset);
+    syncVizSelectionUi();
+  }
+
+  function stepModelPreset(delta) {
+    const pairs = getAllPresetPairs();
+    let idx = pairs.findIndex((p) => p.modelId === config.model && p.presetId === config.preset);
+    if (idx < 0) idx = 0;
+    const nextIdx = (idx + delta + pairs.length) % pairs.length;
+    selectModelPreset(pairs[nextIdx].modelId, pairs[nextIdx].presetId);
+  }
+
+  function toggleVizPopupMenu(force) {
+    if (!popupMenuEl) return;
+    const next = typeof force === "boolean" ? force : !runtime.menuOpen;
+    runtime.menuOpen = next;
+    popupMenuEl.classList.toggle("open", next);
+    if (next) {
+      const bar = document.getElementById("wmp-stage-bottom-bar");
+      const anchor = document.getElementById("wmp-stage-menu-btn") || bar;
+      if (anchor) {
+        const ar = anchor.getBoundingClientRect();
+        const barRect = bar ? bar.getBoundingClientRect() : ar;
+        const left = Math.max(8, Math.min(window.innerWidth - 266, Math.round(ar.left)));
+        const bottom = Math.max(60, Math.round(window.innerHeight - barRect.top + 4));
+        setStyleSafe(popupMenuEl, "left", `${left}px`);
+        setStyleSafe(popupMenuEl, "bottom", `${bottom}px`);
+      }
+      syncVizSelectionUi();
+    }
+  }
+
+  function formatDurationClock(ms) {
+    const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+    if (totalSec <= 0) return "--:--";
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const padS = s < 10 ? `0${s}` : `${s}`;
+    if (h > 0) {
+      const padM = m < 10 ? `0${m}` : `${m}`;
+      return `${h}:${padM}:${padS}`;
+    }
+    return `${m}:${padS}`;
+  }
+
   function updateAudioStatusPill() {
-    if (!bpmLabelEl) return;
     const srcTag = features.sourceMode === "full-hd" || features.sourceMode === "3-band" ? "3-Band" : features.sourceMode === "loudness" ? "Loudness" : "Auto";
-    setTextSafe(bpmLabelEl, `${Math.round(features.bpm || 120)} BPM · ${srcTag}`);
+    const bpmText = `${Math.round(features.bpm || 120)} BPM · ${srcTag}`;
+    setTextSafe(bpmLabelEl, bpmText);
+    const durText = formatDurationClock(playback.durationMs);
+    setTextSafe(tickerRightEl, `${bpmText}  |  Total Time: ${durText}`);
   }
 
   function updateFooterMeta() {
-    setTextSafe(titleEl, playback.title || "Spotify Velvet Red");
-    setTextSafe(artistEl, playback.artist || (playback.isPaused ? "Paused" : "Playing"));
+    const t = playback.title || "Spotify Velvet Red";
+    const a = playback.artist || (playback.isPaused ? "Paused" : "Playing");
+    setTextSafe(titleEl, t);
+    setTextSafe(artistEl, a);
+    const stateVerb = playback.isPaused ? "Paused" : "Playing";
+    const playGlyph = document.getElementById("wmp-ticker-play-icon");
+    setTextSafe(playGlyph, playback.isPaused ? "\u275A\u275A" : "\u25B6");
+    const tickerLabel = document.getElementById("wmp-ticker-status-text");
+    setTextSafe(tickerLabel, `${stateVerb}: "${t}"${playback.artist ? " - " + playback.artist : ""}`);
     updateAudioStatusPill();
+  }
+
+  function syncSharedControlsHost(useSurface) {
+    const mode = useSurface ? "surface" : "lyrics";
+    if (runtime.hudContainerMode === mode) return;
+    runtime.hudContainerMode = mode;
+
+    const colorsWrap = document.getElementById("wmp-hud-colors");
+    const sensSelect = document.getElementById("wmp-sensitivity-select");
+    const fullBtn = document.getElementById("wmp-fullscreen-btn");
+    const exitBtn = document.getElementById("wmp-surface-exit-btn");
+
+    if (useSurface) {
+      const mid = document.getElementById("wmp-stage-ctrl-mid");
+      const right = document.getElementById("wmp-stage-ctrl-right");
+      if (mid && colorsWrap) mid.appendChild(colorsWrap);
+      if (mid && sensSelect) mid.appendChild(sensSelect);
+      if (right && fullBtn) right.appendChild(fullBtn);
+      if (right && exitBtn) right.appendChild(exitBtn);
+    } else {
+      const panel = document.getElementById("wmp-hud-panel");
+      const audioPill = document.getElementById("wmp-hud-audio-pill");
+      const rightCluster = document.getElementById("wmp-hud-right-cluster");
+      if (panel && colorsWrap) panel.appendChild(colorsWrap);
+      if (audioPill && sensSelect) audioPill.appendChild(sensSelect);
+      if (rightCluster && fullBtn) rightCluster.appendChild(fullBtn);
+      if (rightCluster && exitBtn) rightCluster.appendChild(exitBtn);
+    }
+  }
+
+  function updateLeftTaskbarState(routerPath, lyricsRoute) {
+    const taskbar = document.getElementById("wmp-left-taskbar");
+    if (!taskbar) return;
+    const sidebar = taskbar.parentElement;
+    if (sidebar) {
+      const sw = sidebar.getBoundingClientRect().width;
+      toggleClassSafe(taskbar, "is-expanded", sw >= 150);
+    }
+
+    let activeKey = "home";
+    if (runtime.surfaceMode) {
+      activeKey = "nowplaying";
+    } else if (lyricsRoute) {
+      activeKey = "lyrics";
+    } else if (routerPath.startsWith("/search") || routerPath.startsWith("/genre") || routerPath.startsWith("/browse")) {
+      activeKey = "browse";
+    } else if (routerPath.startsWith("/collection") || routerPath.startsWith("/playlist") || routerPath.startsWith("/album") || routerPath.startsWith("/artist")) {
+      activeKey = "library";
+    }
+
+    taskbar.querySelectorAll(".wmp-task-tab").forEach((tab) => {
+      toggleClassSafe(tab, "active", tab.dataset.taskKey === activeKey);
+    });
+  }
+
+  function isFullscreenUiBusy() {
+    if (runtime.menuOpen) return true;
+    const barIds = ["wmp-stage-bottom-bar", "wmp-hud-topbar", "wmp-viz-popup-menu"];
+    for (let i = 0; i < barIds.length; i++) {
+      const el = document.getElementById(barIds[i]);
+      if (el && el.matches && el.matches(":hover")) return true;
+    }
+    return false;
+  }
+
+  function clearFsIdleTimer() {
+    if (runtime.fsIdleTimer) {
+      clearTimeout(runtime.fsIdleTimer);
+      runtime.fsIdleTimer = 0;
+    }
+    if (runtime.fsIdle) {
+      runtime.fsIdle = false;
+    }
+    toggleClassSafe(document.documentElement, "wmp-fs-idle", false);
+  }
+
+  function scheduleFsIdleHide() {
+    if (runtime.fsIdleTimer) {
+      clearTimeout(runtime.fsIdleTimer);
+      runtime.fsIdleTimer = 0;
+    }
+    const fsActive = !!(runtime.isFullscreen || document.fullscreenElement);
+    const fsTarget = fsActive && (runtime.surfaceMode || runtime.onLyricsRoute);
+    if (!fsTarget) {
+      clearFsIdleTimer();
+      return;
+    }
+    runtime.fsIdleTimer = setTimeout(() => {
+      runtime.fsIdleTimer = 0;
+      const stillFs = !!(runtime.isFullscreen || document.fullscreenElement);
+      if (!stillFs || !(runtime.surfaceMode || runtime.onLyricsRoute)) {
+        clearFsIdleTimer();
+        return;
+      }
+      if (isFullscreenUiBusy()) {
+        scheduleFsIdleHide();
+        return;
+      }
+      runtime.fsIdle = true;
+      toggleClassSafe(document.documentElement, "wmp-fs-idle", true);
+    }, 5000);
+  }
+
+  function wakeFullscreenChrome() {
+    const fsActive = !!(runtime.isFullscreen || document.fullscreenElement);
+    if (!fsActive || !(runtime.surfaceMode || runtime.onLyricsRoute)) {
+      clearFsIdleTimer();
+      return;
+    }
+    if (runtime.fsIdle) {
+      runtime.fsIdle = false;
+      toggleClassSafe(document.documentElement, "wmp-fs-idle", false);
+    }
+    scheduleFsIdleHide();
   }
 
   function updateVisibilityAndLayout() {
@@ -1663,9 +2760,23 @@
 
     const showLyricsViz = !runtime.surfaceMode && lyricsRoute && config.lyricsEnabled;
     runtime.visualActive = runtime.surfaceMode || showLyricsViz;
+    const fsActive = !!(runtime.isFullscreen || document.fullscreenElement);
 
     toggleClassSafe(document.documentElement, "wmp-lyrics-viz-active", showLyricsViz);
     toggleClassSafe(document.documentElement, "wmp-surface-active", runtime.surfaceMode);
+    toggleClassSafe(document.documentElement, "wmp-surface-fullscreen", runtime.surfaceMode && fsActive);
+    toggleClassSafe(document.documentElement, "wmp-lyrics-fullscreen", !runtime.surfaceMode && lyricsRoute && fsActive);
+
+    if (fsActive && (runtime.surfaceMode || lyricsRoute)) {
+      if (!runtime.fsIdle && !runtime.fsIdleTimer) {
+        scheduleFsIdleHide();
+      }
+      toggleClassSafe(document.documentElement, "wmp-fs-idle", runtime.fsIdle);
+    } else {
+      clearFsIdleTimer();
+    }
+
+    syncSharedControlsHost(runtime.surfaceMode);
 
     const mainView = getMainViewContainer();
     if (mainView) {
@@ -1681,10 +2792,22 @@
       const showHud = runtime.surfaceMode || lyricsRoute;
       setStyleSafe(hudRoot, "display", showHud ? "block" : "none");
       if (showHud) {
-        setStyleSafe(hudRoot, "left", `${Math.round(rect.left + 16)}px`);
-        setStyleSafe(hudRoot, "top", `${Math.round(rect.top + 14)}px`);
-        setStyleSafe(hudRoot, "width", `${Math.max(260, Math.round(rect.width - 34))}px`);
-        setStyleSafe(hudRoot, "height", `${Math.max(120, Math.round(rect.height - 28))}px`);
+        if (fsActive) {
+          setStyleSafe(hudRoot, "left", "0px");
+          setStyleSafe(hudRoot, "top", "0px");
+          setStyleSafe(hudRoot, "width", `${Math.round(window.innerWidth)}px`);
+          setStyleSafe(hudRoot, "height", `${Math.round(window.innerHeight)}px`);
+        } else if (runtime.surfaceMode) {
+          setStyleSafe(hudRoot, "left", `${Math.round(rect.left + 2)}px`);
+          setStyleSafe(hudRoot, "top", `${Math.round(rect.top + 2)}px`);
+          setStyleSafe(hudRoot, "width", `${Math.max(260, Math.round(rect.width - 4))}px`);
+          setStyleSafe(hudRoot, "height", `${Math.max(120, Math.round(rect.height - 4))}px`);
+        } else {
+          setStyleSafe(hudRoot, "left", `${Math.round(rect.left + 12)}px`);
+          setStyleSafe(hudRoot, "top", `${Math.round(rect.top + 10)}px`);
+          setStyleSafe(hudRoot, "width", `${Math.max(260, Math.round(rect.width - 24))}px`);
+          setStyleSafe(hudRoot, "height", `${Math.max(120, Math.round(rect.height - 20))}px`);
+        }
         setStyleSafe(hudRoot, "zIndex", runtime.surfaceMode ? "65" : "55");
       }
     }
@@ -1695,10 +2818,14 @@
     const exitBtn = document.getElementById("wmp-surface-exit-btn");
     const footer = document.getElementById("wmp-hud-track-footer");
 
-    setStyleSafe(leftCluster, "display", runtime.visualActive ? "inline-flex" : "none");
+    setStyleSafe(leftCluster, "display", !runtime.surfaceMode && showLyricsViz ? "flex" : "none");
     setStyleSafe(fullBtn, "display", runtime.visualActive ? "inline-flex" : "none");
     setStyleSafe(exitBtn, "display", runtime.surfaceMode ? "inline-flex" : "none");
     setStyleSafe(footer, "display", runtime.surfaceMode ? "flex" : "none");
+
+    if (!runtime.surfaceMode && runtime.menuOpen) {
+      closeVizPopupMenu();
+    }
 
     if (lyricsToggle) {
       setStyleSafe(lyricsToggle, "display", !runtime.surfaceMode && lyricsRoute ? "inline-flex" : "none");
@@ -1709,8 +2836,73 @@
 
     const surfaceBtn = document.getElementById("wmp-visualizer-surface-btn");
     toggleClassSafe(surfaceBtn, "active", runtime.surfaceMode);
+    updateLeftTaskbarState(routerPath, lyricsRoute);
+    syncVizSelectionUi();
 
     ensureRenderLoopState();
+  }
+
+  function createLeftTaskbar() {
+    if (document.getElementById("wmp-left-taskbar")) return;
+    const sidebar = document.querySelector("#Desktop_LeftSidebar_Id, .yQCyOSVcMCen_NJKPHB6");
+    if (!sidebar) return;
+
+    const bar = document.createElement("nav");
+    bar.id = "wmp-left-taskbar";
+    bar.setAttribute("aria-label", "WMP Media Taskbar");
+
+    const tabs = [
+      { key: "nowplaying", html: "Now <br>Playing", title: "Now Playing Visualizer Surface" },
+      { key: "home", html: "Media <br>Guide", title: "Home" },
+      { key: "browse", html: "Browse", title: "Search & Browse" },
+      { key: "library", html: "Media <br>Library", title: "Your Library & Liked Songs" },
+      { key: "lyrics", html: "Lyrics", title: "Track Lyrics" }
+    ];
+
+    tabs.forEach((t) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "wmp-task-tab";
+      btn.dataset.taskKey = t.key;
+      btn.title = t.title;
+      btn.innerHTML = t.html;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (t.key === "nowplaying") {
+          runtime.surfaceMode = true;
+          updateVisibilityAndLayout();
+          return;
+        }
+        exitSurfaceMode(false);
+        if (t.key === "home") {
+          const hb = document.querySelector('button[data-testid="home-button"]');
+          if (hb) hb.click();
+          else if (apis.history && typeof apis.history.push === "function") apis.history.push("/");
+        } else if (t.key === "browse") {
+          const bb = document.querySelector('button[data-testid="browse-button"]');
+          if (bb) bb.click();
+          else if (apis.history && typeof apis.history.push === "function") apis.history.push("/search");
+          else {
+            const si = document.querySelector('#global-nav-bar input[data-testid="search-input"]');
+            if (si) si.focus();
+          }
+        } else if (t.key === "library") {
+          if (apis.history && typeof apis.history.push === "function") {
+            apis.history.push("/collection/tracks");
+          }
+        } else if (t.key === "lyrics") {
+          if (!isOnLyricsRoute()) {
+            const lb = document.querySelector('button[data-testid="lyrics-button"]');
+            if (lb && !lb.disabled && lb.getAttribute("aria-disabled") !== "true") lb.click();
+            else if (apis.history && typeof apis.history.push === "function") apis.history.push("/lyrics");
+          }
+        }
+      });
+      bar.appendChild(btn);
+    });
+
+    sidebar.insertBefore(bar, sidebar.firstElementChild);
   }
 
   function toggleFullscreen() {
@@ -1725,6 +2917,11 @@
     }
     const fullBtn = document.getElementById("wmp-fullscreen-btn");
     setTextSafe(fullBtn, next ? "Exit Fullscreen" : "Fullscreen");
+    if (next) {
+      wakeFullscreenChrome();
+    } else {
+      clearFsIdleTimer();
+    }
     updateVisibilityAndLayout();
   }
 
@@ -1777,6 +2974,13 @@
     canvas = document.createElement("canvas");
     canvas.id = "spotify-lyrics-visualizer";
     canvas.setAttribute("aria-hidden", "true");
+    ["click", "dblclick", "auxclick", "contextmenu"].forEach((evName) => {
+      canvas.addEventListener(evName, (e) => {
+        if (!runtime.surfaceMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
     document.body.appendChild(canvas);
     ctx = canvas.getContext("2d", { alpha: false });
 
@@ -1799,17 +3003,14 @@
     modelsWrap.id = "wmp-hud-models";
 
     MODELS.forEach((m) => {
+      if (m.id === "none") return;
       const mb = document.createElement("button");
       mb.type = "button";
       mb.className = "wmp-model-btn" + (config.model === m.id ? " active" : "");
-      mb.textContent = m.label;
+      mb.textContent = m.shortLabel || m.label;
       mb.dataset.modelId = m.id;
       mb.addEventListener("click", () => {
-        config.model = m.id;
-        writeStore(STORE_KEYS.model, m.id);
-        modelsWrap.querySelectorAll(".wmp-model-btn").forEach((el) => {
-          el.classList.toggle("active", el.dataset.modelId === m.id);
-        });
+        selectModelPreset(m.id, m.presets[0].id);
       });
       modelsWrap.appendChild(mb);
     });
@@ -1952,19 +3153,165 @@
 
     const footer = document.createElement("div");
     footer.id = "wmp-hud-track-footer";
-    titleEl = document.createElement("div");
-    titleEl.id = "wmp-hud-track-title";
     artistEl = document.createElement("div");
     artistEl.id = "wmp-hud-track-artist";
-    footer.appendChild(titleEl);
+    titleEl = document.createElement("div");
+    titleEl.id = "wmp-hud-track-title";
     footer.appendChild(artistEl);
+    footer.appendChild(titleEl);
+
+    const stageBottomBar = document.createElement("div");
+    stageBottomBar.id = "wmp-stage-bottom-bar";
+
+    const stageCtrlRow = document.createElement("div");
+    stageCtrlRow.id = "wmp-stage-controls-row";
+
+    const ctrlLeft = document.createElement("div");
+    ctrlLeft.id = "wmp-stage-ctrl-left";
+
+    const menuBtn = document.createElement("button");
+    menuBtn.id = "wmp-stage-menu-btn";
+    menuBtn.type = "button";
+    menuBtn.className = "wmp-bevel-sq-btn";
+    menuBtn.title = "Select visualization";
+    menuBtn.textContent = "\u2630";
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleVizPopupMenu();
+    });
+
+    const prevBtn = document.createElement("button");
+    prevBtn.id = "wmp-stage-prev-btn";
+    prevBtn.type = "button";
+    prevBtn.className = "wmp-bevel-round-btn";
+    prevBtn.title = "Previous visualization";
+    prevBtn.textContent = "\u25C4";
+    prevBtn.addEventListener("click", () => {
+      stepModelPreset(-1);
+    });
+
+    const nextBtn = document.createElement("button");
+    nextBtn.id = "wmp-stage-next-btn";
+    nextBtn.type = "button";
+    nextBtn.className = "wmp-bevel-round-btn";
+    nextBtn.title = "Next visualization";
+    nextBtn.textContent = "\u25BA";
+    nextBtn.addEventListener("click", () => {
+      stepModelPreset(1);
+    });
+
+    presetLabelEl = document.createElement("span");
+    presetLabelEl.id = "wmp-active-preset-label";
+    presetLabelEl.title = "Click to choose visualization preset";
+    presetLabelEl.textContent = getActivePresetDisplayLabel();
+    presetLabelEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleVizPopupMenu();
+    });
+
+    ctrlLeft.appendChild(menuBtn);
+    ctrlLeft.appendChild(prevBtn);
+    ctrlLeft.appendChild(nextBtn);
+    ctrlLeft.appendChild(presetLabelEl);
+
+    const ctrlMid = document.createElement("div");
+    ctrlMid.id = "wmp-stage-ctrl-mid";
+
+    const ctrlRight = document.createElement("div");
+    ctrlRight.id = "wmp-stage-ctrl-right";
+
+    stageCtrlRow.appendChild(ctrlLeft);
+    stageCtrlRow.appendChild(ctrlMid);
+    stageCtrlRow.appendChild(ctrlRight);
+
+    const tickerRow = document.createElement("div");
+    tickerRow.id = "wmp-stage-ticker-row";
+
+    tickerLeftEl = document.createElement("div");
+    tickerLeftEl.id = "wmp-ticker-left";
+    const playGlyph = document.createElement("span");
+    playGlyph.id = "wmp-ticker-play-icon";
+    playGlyph.textContent = "\u25B6";
+    const tickerStatus = document.createElement("span");
+    tickerStatus.id = "wmp-ticker-status-text";
+    tickerStatus.textContent = "Playing";
+    tickerLeftEl.appendChild(playGlyph);
+    tickerLeftEl.appendChild(tickerStatus);
+
+    tickerRightEl = document.createElement("div");
+    tickerRightEl.id = "wmp-ticker-right";
+    tickerRightEl.textContent = "120 BPM · Auto  |  Total Time: --:--";
+
+    tickerRow.appendChild(tickerLeftEl);
+    tickerRow.appendChild(tickerRightEl);
+
+    stageBottomBar.appendChild(stageCtrlRow);
+    stageBottomBar.appendChild(tickerRow);
+
+    popupMenuEl = document.createElement("div");
+    popupMenuEl.id = "wmp-viz-popup-menu";
+    MODELS.forEach((m, idx) => {
+      if (idx === 2) {
+        const divEl = document.createElement("div");
+        divEl.className = "wmp-menu-divider";
+        popupMenuEl.appendChild(divEl);
+      }
+      const grp = document.createElement("div");
+      grp.className = "wmp-menu-cat-group" + (config.model === m.id ? " active" : "");
+      grp.dataset.modelId = m.id;
+
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "wmp-menu-item" + (config.model === m.id ? " active" : "");
+      const titleSpan = document.createElement("span");
+      titleSpan.textContent = m.label;
+      item.appendChild(titleSpan);
+      if (m.presets.length > 1) {
+        const subSpan = document.createElement("span");
+        subSpan.className = "wmp-menu-sub";
+        subSpan.textContent = m.presets[0].label + " \u25B8";
+        item.appendChild(subSpan);
+      }
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        selectModelPreset(m.id, m.presets[0].id);
+        if (m.presets.length <= 1) {
+          closeVizPopupMenu();
+        }
+      });
+      grp.appendChild(item);
+
+      if (m.presets.length > 1) {
+        const presetsRow = document.createElement("div");
+        presetsRow.className = "wmp-menu-presets";
+        m.presets.forEach((p) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "wmp-preset-chip" + (config.model === m.id && config.preset === p.id ? " active" : "");
+          chip.dataset.presetId = p.id;
+          chip.textContent = p.label;
+          chip.addEventListener("click", (e) => {
+            e.stopPropagation();
+            selectModelPreset(m.id, p.id);
+            closeVizPopupMenu();
+          });
+          presetsRow.appendChild(chip);
+        });
+        grp.appendChild(presetsRow);
+      }
+
+      popupMenuEl.appendChild(grp);
+    });
 
     hudRoot.appendChild(topBar);
     hudRoot.appendChild(footer);
+    hudRoot.appendChild(stageBottomBar);
+    hudRoot.appendChild(popupMenuEl);
     document.body.appendChild(hudRoot);
 
     drawColorWheel();
     updateWheelMarker();
+    syncVizSelectionUi();
   }
 
   function setupListeners() {
@@ -1976,8 +3323,30 @@
         runtime.isFullscreen = activeFs;
         const fullBtn = document.getElementById("wmp-fullscreen-btn");
         setTextSafe(fullBtn, activeFs ? "Exit Fullscreen" : "Fullscreen");
+        if (activeFs) {
+          wakeFullscreenChrome();
+        } else {
+          clearFsIdleTimer();
+        }
         updateVisibilityAndLayout();
       }
+    });
+
+    document.addEventListener("mousemove", () => {
+      if (!(runtime.isFullscreen || document.fullscreenElement) || !(runtime.surfaceMode || runtime.onLyricsRoute)) return;
+      const now = performance.now();
+      if (runtime.fsIdle || now - runtime.lastMouseMoveMs > 100) {
+        runtime.lastMouseMoveMs = now;
+        wakeFullscreenChrome();
+      }
+    }, true);
+
+    ["mousedown", "touchstart", "wheel"].forEach((evName) => {
+      document.addEventListener(evName, () => {
+        if ((runtime.isFullscreen || document.fullscreenElement) && (runtime.surfaceMode || runtime.onLyricsRoute)) {
+          wakeFullscreenChrome();
+        }
+      }, true);
     });
 
     document.addEventListener("visibilitychange", () => {
@@ -1985,9 +3354,12 @@
     });
 
     document.addEventListener("click", (e) => {
-      if (!runtime.surfaceMode) return;
       const target = e.target && e.target.closest ? e.target : null;
-      if (!target || target.closest("#wmp-visualizer-surface-hud, #wmp-visualizer-surface-btn")) return;
+      if (runtime.menuOpen && (!target || !target.closest("#wmp-viz-popup-menu, #wmp-stage-menu-btn, #wmp-active-preset-label"))) {
+        closeVizPopupMenu();
+      }
+      if (!runtime.surfaceMode) return;
+      if (!target || target.closest("#wmp-visualizer-surface-hud, #wmp-visualizer-surface-btn, #wmp-left-taskbar")) return;
 
       if (target.closest('button[data-testid="top-bar-back-button"]')) {
         e.preventDefault();
@@ -2036,9 +3408,13 @@
       }
     }, true);
 
-    document.addEventListener("keydown", (e) => {
+    window.addEventListener("keydown", (e) => {
       const tag = (e.target && e.target.tagName) || "";
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
+
+      if ((runtime.isFullscreen || document.fullscreenElement) && (runtime.surfaceMode || runtime.onLyricsRoute) && e.key !== "Escape") {
+        wakeFullscreenChrome();
+      }
 
       if (e.altKey && (e.key === "v" || e.key === "V")) {
         e.preventDefault();
@@ -2048,28 +3424,35 @@
           runtime.surfaceMode = true;
           updateVisibilityAndLayout();
         }
+      } else if (e.altKey && e.key === "Enter" && runtime.visualActive) {
+        e.preventDefault();
+        toggleFullscreen();
       } else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey && !e.metaKey && runtime.visualActive) {
         e.preventDefault();
         toggleFullscreen();
-      } else if (e.key === "Escape" && (runtime.isFullscreen || runtime.surfaceMode)) {
-        if (runtime.isFullscreen) {
+      } else if (e.key === "Escape") {
+        if (runtime.menuOpen) {
+          closeVizPopupMenu();
+        } else if (runtime.isFullscreen || document.fullscreenElement) {
           toggleFullscreen();
         } else if (runtime.surfaceMode) {
           exitSurfaceMode(false);
         }
       }
-    });
+    }, true);
 
     let moRafQueued = false;
-    const isOwnNode = (n) => n === canvas || n === hudRoot || n === surfaceBtnRef;
     let surfaceBtnRef = null;
+    let taskbarRef = null;
+    const isOwnNode = (n) => n === canvas || n === hudRoot || n === surfaceBtnRef || n === taskbarRef;
     const mo = new MutationObserver((mutations) => {
       surfaceBtnRef = document.getElementById("wmp-visualizer-surface-btn");
+      taskbarRef = document.getElementById("wmp-left-taskbar");
       let relevant = false;
       for (let i = 0; i < mutations.length; i++) {
         const m = mutations[i];
         const t = m.target;
-        if ((hudRoot && hudRoot.contains(t)) || t === canvas || (surfaceBtnRef && surfaceBtnRef.contains(t))) {
+        if ((hudRoot && hudRoot.contains(t)) || t === canvas || (surfaceBtnRef && surfaceBtnRef.contains(t)) || (taskbarRef && taskbarRef.contains(t))) {
           continue;
         }
         const onlyOwnAdd = m.addedNodes.length > 0 && m.removedNodes.length === 0 && Array.from(m.addedNodes).every(isOwnNode);
@@ -2083,6 +3466,7 @@
       requestAnimationFrame(() => {
         moRafQueued = false;
         createSurfacePlayerButton();
+        createLeftTaskbar();
         updateVisibilityAndLayout();
       });
     });
@@ -2097,6 +3481,7 @@
     }
     buildUi();
     createSurfacePlayerButton();
+    createLeftTaskbar();
     setupListeners();
     scanReactApis(true);
     pollPlaybackClock();
@@ -2104,6 +3489,7 @@
 
     setInterval(() => {
       createSurfacePlayerButton();
+      createLeftTaskbar();
       pollPlaybackClock();
       updateVisibilityAndLayout();
     }, 220);

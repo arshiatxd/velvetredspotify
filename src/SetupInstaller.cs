@@ -63,7 +63,7 @@ namespace VelvetRedInstaller
             lblTitle.AutoSize = true;
 
             lblSubtitle = new Label();
-            lblSubtitle.Text = "Windows 7 Aero Glass Theme + WMP Visualizer Studio";
+            lblSubtitle.Text = "WMP 9 Velvet Red Theme + 9-Engine Visualizer Studio";
             lblSubtitle.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular);
             lblSubtitle.ForeColor = Color.FromArgb(215, 172, 184);
             lblSubtitle.BackColor = Color.Transparent;
